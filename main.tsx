@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { createRoot } from "react-dom/client";
 import { motion } from "framer-motion";
 import { translations, type Language, type TKey } from "./i18n";
+import "./index.css";
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    TYPES
@@ -2075,4 +2077,10 @@ export function App(){
     <AuthModal open={showAuth} mode={authMode} th={theme} t={t} onClose={()=>setShowAuth(false)}
       onSignIn={handleSignIn} onSignUp={handleSignUp} onToggle={()=>setAuthMode(m=>m==="signin"?"signup":"signin")}/>
   </div>;
+}
+
+const rootEl = document.getElementById("root");
+
+if (rootEl) {
+  createRoot(rootEl).render(<App />);
 }

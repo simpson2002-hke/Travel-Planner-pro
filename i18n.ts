@@ -1,57 +1,264 @@
-@import "tailwindcss";
+export type Language = "en" | "zh";
 
-:root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #020617;
-  color-scheme: dark;
-  font-size: 17px;
-}
+const en = {
+  save: "Save", cancel: "Cancel", delete: "Delete", edit: "Edit", add: "Add",
+  back: "Back", close: "Close", remove: "Remove", confirm: "Confirm",
+  loading: "Loading…", noData: "No data yet",
+  customLocation: "Custom Location", setCustom: "Set Custom",
+  locationName: "Location Name", latitude: "Latitude", longitude: "Longitude",
+  uploadFile: "Upload File", pasteUrl: "or paste URL", fileUrl: "File URL",
+  balanceSummary: "Balance Summary", totalPaid: "Total Paid", myShare: "My Share", iOwe: "I Owe",
+  monthlyClimate: "Monthly Climate",
+  warm: "Warm", cool: "Cool", mild: "Mild", wetter: "Wetter", drier: "Drier", balanced: "Balanced",
 
-:root[data-theme="light"] {
-  background: #cdd0d8;
-  color-scheme: light;
-}
+  signIn: "Sign In", signUp: "Create Account", signOut: "Sign Out",
+  accountName: "Account Name", email: "Email", password: "Password",
+  confirmPassword: "Confirm Password", firstName: "First Name",
+  lastName: "Last Name", phone: "Phone",
+  signInDesc: "Sign in with account name or email",
+  accountOrEmail: "Account name or email",
+  passwordMismatch: "Passwords do not match.",
+  accountExists: "An account with this email or name already exists.",
+  invalidCredentials: "Account / email or password is incorrect.",
 
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+  heroTitle: "Plan Your Next Adventure",
+  heroSub: "Organise trips, track expenses, and explore together.",
+  getStarted: "Get Started", learnMore: "Learn More",
+  feat1: "Collaborative Planning", feat1d: "Create & share trips with your travel companions.",
+  feat2: "Smart Budgeting", feat2d: "Track spending, split bills, and settle up easily.",
+  feat3: "Pack Smart", feat3d: "Shared checklists so nothing gets left behind.",
 
-body {
-  margin: 0;
-  min-width: 320px;
-  background: #020617;
-  color: #ffffff;
-  transition: background-color 250ms ease, color 250ms ease;
-}
-:root[data-theme="light"] body {
-  background: #cdd0d8;
-  color: #0f172a;
-}
+  admin: "Admin", dashboard: "Dashboard", myTrips: "My Trips",
 
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
-#root { min-height: 100vh; }
+  personalInfo: "Personal Information", tripSummary: "Trip Summary",
+  totalTrips: "Total Trips", upcomingTrips: "Upcoming", pastTrips: "Past",
+  editProfile: "Edit Profile", saveProfile: "Save Profile",
+  optional: "optional",
+  nationality: "Nationality", passport: "Passport No.", passportExpiry: "Passport Expiry",
+  dietaryNotes: "Dietary Notes", emergencyContact: "Emergency Contact",
+  homeAirport: "Home Airport",
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(100,100,120,.35); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(100,100,120,.55); }
+  createTrip: "Create Trip", joinTrip: "Join Trip",
+  tripName: "Trip Name", destination: "Destination",
+  startDate: "Start Date", endDate: "End Date",
+  tripId: "Trip ID", enterTripId: "Enter trip ID to join…",
+  copyId: "Copy ID", copied: "Copied!",
+  noTrips: "No trips yet", noTripsDesc: "Create a new trip or join one with a Trip ID.",
+  duration: "Duration", days: "days", members: "Members", owner: "Owner",
+  status: "Status", upcoming: "Upcoming", active: "Active", past: "Past",
 
-input[type="color"] { padding: 2px 4px; border-radius: 8px; }
+  overview: "Overview", itinerary: "Itinerary", expenses: "Expenses",
+  luggage: "Luggage", settings: "Settings", travelers: "Travellers",
 
-/* hero crossfade */
-.hero-bg { position: absolute; inset: 0; background-size: cover; background-position: center; transition: opacity 1.2s ease; }
+  dates: "Dates", flightDetails: "Flight Details", hotelDetails: "Hotel Details",
+  noFlightDetails: "Flight details not added yet", noHotelDetails: "Hotel details not added yet",
+  noWeatherLocation: "No weather location set yet",
+  useDestination: "Use Destination",
+  savedLocation: "Saved Weather Location",
+  flightLegs: "Flight Legs", hotelStays: "Hotel Stays", addLeg: "Add Leg", addHotel: "Add Hotel",
+  seat: "Seat", baggageAllowance: "Baggage", propertyContact: "Property Contact",
+  legNotes: "Leg Notes", stayNotes: "Stay Notes", tripMonths: "Trip Months",
+  transitTime: "Transit Time", transitDetails: "Transit Details", betweenStops: "Between Stops",
+  addTransportDetail: "Add Transport Detail", editTransportDetail: "Edit Transport Detail",
+  clearTransportDetail: "Clear Transport Detail",
+  itineraryPhoto: "Itinerary Photo", photoUrl: "Photo URL", uploadPhoto: "Upload Photo",
+  downloadAttachment: "Download Attachment",
 
-/* file input */
-.file-label {
-  display: inline-flex; align-items: center; gap: .5rem;
-  cursor: pointer; border-radius: 9999px; padding: .5rem 1rem;
-  font-size: .8125rem; font-weight: 500; transition: background .15s;
-}
-.file-label input[type="file"] { display: none; }
+  travelNotes: "Travel Notes", addNote: "Add Note",
+  noteText: "Write a note…", attachments: "Attachments",
+  addAttachment: "Add Attachment", uploadImage: "Upload Image",
+  orUrl: "or paste URL", imageUrl: "Image URL",
+  noNotes: "No travel notes yet",
+  noNotesDesc: "Add notes, photos, and links for this trip.",
+  weather: "Weather", refreshWeather: "Refresh",
+  forecast7: "7-Day Forecast", monthlyHistory: "Monthly History (prev. year)",
+  avgHigh: "Avg High", avgLow: "Avg Low", avgRain: "Avg Rain",
 
-/* note attachment thumbnail */
-.att-thumb {
-  width: 80px; height: 80px; object-fit: cover; border-radius: 12px;
-  cursor: pointer; transition: transform .15s;
-}
-.att-thumb:hover { transform: scale(1.08); }
+  day: "Day", time: "Time", activity: "Activity", transport: "Transport",
+  details: "Details", addActivity: "Add Activity",
+  moveUp: "Up", moveDown: "Down", removeActivity: "Remove",
+  noItinerary: "No itinerary items yet",
+  noItineraryDesc: "Plan your daily activities here.",
+  autoGenerate: "Auto-Generate Itinerary",
+
+  addExpense: "Add Expense", amount: "Amount", currency: "Currency",
+  category: "Category", paidBy: "Paid By", splitWith: "Split With",
+  date: "Date", expNotes: "Notes",
+  noExpenses: "No expenses recorded",
+  noExpensesDesc: "Start tracking your trip spending.",
+  totalSpent: "Total Spent", settlements: "Settlements",
+  owes: "owes", perPerson: "per person", deleteExpense: "Delete",
+
+  addItem: "Add Item", itemName: "Item name…",
+  allCats: "All", packed: "packed",
+  noLuggage: "Packing list is empty",
+  noLuggageDesc: "Add items you need to bring.",
+
+  tripDetails: "Trip Details", flightNumber: "Flight No.",
+  hotelName: "Hotel", transportMode: "Transport Mode",
+  generalNotes: "General Notes", bannerColor: "Banner Colour",
+  bannerImage: "Banner Image", uploadBanner: "Upload Image",
+  bannerUrl: "Or paste image URL", removeBanner: "Remove Image",
+  airline: "Airline", departureAirport: "Departure Airport", arrivalAirport: "Arrival Airport",
+  departureTime: "Departure Time", arrivalTime: "Arrival Time", terminal: "Terminal",
+  bookingReference: "Booking Reference", hotelAddress: "Hotel Address", roomType: "Room Type",
+  checkIn: "Check-in", checkOut: "Check-out", confirmationCode: "Confirmation Code",
+  weatherLocationSettings: "Weather Location",
+
+  adminLogin: "Admin Login", adminSetup: "Set Admin Password",
+  setPassword: "Set Password",
+  adminTrips: "Trips", adminTravelers: "Travelers",
+  adminLuggage: "Luggage Config", adminWebsite: "Website",
+  adminPassword: "Password",
+  websiteName: "Website Name", websiteDesc: "Description",
+  weatherApi: "Weather API Settings",
+  apiHelp1: "Default: Open-Meteo (free, no key).",
+  apiHelp2: "Geocode URL needs {query} placeholder.",
+  apiHelp3: "Forecast URL needs {lat} and {lon} placeholders.",
+  providerName: "Provider Name",
+  geocodeUrl: "Geocode URL Template",
+  forecastUrl: "Forecast URL Template",
+  resetDefaults: "Reset Defaults",
+  luggageCfgHelp: "Set default luggage categories & items for new trips.",
+  addCategory: "Add Category", categoryName: "Category name…",
+  addDefaultItem: "Add default item…", removeCategory: "Remove Category",
+  saveLuggageCfg: "Save Config",
+  updatePassword: "Update Password", newPassword: "New Password",
+  passwordUpdated: "Password updated.", saved: "Saved!",
+
+  language: "Language", english: "English", chinese: "繁體中文",
+  darkMode: "Dark", lightMode: "Light",
+};
+
+const zh: typeof en = {
+  save: "儲存", cancel: "取消", delete: "刪除", edit: "編輯", add: "新增",
+  back: "返回", close: "關閉", remove: "移除", confirm: "確認",
+  loading: "載入中…", noData: "尚無資料",
+  customLocation: "自訂位置", setCustom: "設定自訂",
+  locationName: "位置名稱", latitude: "緯度", longitude: "經度",
+  uploadFile: "上傳檔案", pasteUrl: "或貼上網址", fileUrl: "檔案網址",
+  balanceSummary: "結算摘要", totalPaid: "總付款", myShare: "我的份額", iOwe: "我欠",
+  monthlyClimate: "月均氣候",
+  warm: "偏暖", cool: "偏涼", mild: "溫和", wetter: "較潮濕", drier: "較乾爽", balanced: "平衡",
+
+  signIn: "登入", signUp: "建立帳戶", signOut: "登出",
+  accountName: "帳戶名稱", email: "電子郵件", password: "密碼",
+  confirmPassword: "確認密碼", firstName: "名字",
+  lastName: "姓氏", phone: "電話",
+  signInDesc: "以帳戶名稱或電子郵件登入",
+  accountOrEmail: "帳戶名稱或電子郵件",
+  passwordMismatch: "密碼不一致。",
+  accountExists: "此電子郵件或帳戶名稱已被使用。",
+  invalidCredentials: "帳戶 / 電子郵件或密碼不正確。",
+
+  heroTitle: "規劃你的下一次冒險",
+  heroSub: "組織旅行、追蹤開支、一起探索世界。",
+  getStarted: "開始使用", learnMore: "了解更多",
+  feat1: "協作規劃", feat1d: "與旅伴一起建立和分享行程。",
+  feat2: "智能預算", feat2d: "追蹤花費、分攤帳單、輕鬆結算。",
+  feat3: "智能打包", feat3d: "共享清單，不遺漏任何必需品。",
+
+  admin: "管理", dashboard: "儀表板", myTrips: "我的旅程",
+
+  personalInfo: "個人資料", tripSummary: "旅程摘要",
+  totalTrips: "總旅程", upcomingTrips: "即將出發", pastTrips: "已完成",
+  editProfile: "編輯資料", saveProfile: "儲存資料",
+  optional: "選填",
+  nationality: "國籍", passport: "護照號碼", passportExpiry: "護照到期日",
+  dietaryNotes: "飲食備註", emergencyContact: "緊急聯繫人",
+  homeAirport: "常用機場",
+
+  createTrip: "建立旅程", joinTrip: "加入旅程",
+  tripName: "旅程名稱", destination: "目的地",
+  startDate: "開始日期", endDate: "結束日期",
+  tripId: "旅程編號", enterTripId: "輸入旅程編號以加入…",
+  copyId: "複製編號", copied: "已複製！",
+  noTrips: "尚無旅程", noTripsDesc: "建立新旅程或以編號加入。",
+  duration: "天數", days: "天", members: "成員", owner: "建立者",
+  status: "狀態", upcoming: "即將出發", active: "進行中", past: "已完成",
+
+  overview: "概覽", itinerary: "行程", expenses: "開支",
+  luggage: "行李", settings: "設定", travelers: "旅客",
+
+  dates: "日期", flightDetails: "航班資料", hotelDetails: "飯店資料",
+  noFlightDetails: "尚未新增航班資料", noHotelDetails: "尚未新增飯店資料",
+  noWeatherLocation: "尚未設定天氣位置",
+  useDestination: "使用目的地",
+  savedLocation: "已儲存天氣位置",
+  flightLegs: "航班航段", hotelStays: "飯店住宿", addLeg: "新增航段", addHotel: "新增飯店",
+  seat: "座位", baggageAllowance: "行李", propertyContact: "住宿聯絡方式",
+  legNotes: "航段備註", stayNotes: "住宿備註", tripMonths: "旅程月份",
+  transitTime: "交通時間", transitDetails: "交通詳情", betweenStops: "行程之間",
+  addTransportDetail: "新增交通資訊", editTransportDetail: "編輯交通資訊",
+  clearTransportDetail: "清除交通資訊",
+  itineraryPhoto: "行程照片", photoUrl: "照片網址", uploadPhoto: "上傳照片",
+  downloadAttachment: "下載附件",
+
+  travelNotes: "旅行筆記", addNote: "新增筆記",
+  noteText: "寫下筆記…", attachments: "附件",
+  addAttachment: "新增附件", uploadImage: "上傳圖片",
+  orUrl: "或貼上網址", imageUrl: "圖片網址",
+  noNotes: "尚無旅行筆記",
+  noNotesDesc: "為此旅程新增筆記、照片和連結。",
+  weather: "天氣", refreshWeather: "重新整理",
+  forecast7: "7天天氣預報", monthlyHistory: "月均歷史 (去年)",
+  avgHigh: "均高", avgLow: "均低", avgRain: "均雨量",
+
+  day: "日", time: "時間", activity: "活動", transport: "交通方式",
+  details: "詳情", addActivity: "新增活動",
+  moveUp: "上移", moveDown: "下移", removeActivity: "移除",
+  noItinerary: "尚無行程項目",
+  noItineraryDesc: "在此規劃每日活動。",
+  autoGenerate: "自動產生行程",
+
+  addExpense: "新增開支", amount: "金額", currency: "貨幣",
+  category: "類別", paidBy: "付款人", splitWith: "分攤對象",
+  date: "日期", expNotes: "備註",
+  noExpenses: "尚無開支記錄",
+  noExpensesDesc: "開始追蹤旅行花費。",
+  totalSpent: "總花費", settlements: "結算",
+  owes: "欠", perPerson: "每人", deleteExpense: "刪除",
+
+  addItem: "新增物品", itemName: "物品名稱…",
+  allCats: "全部", packed: "已打包",
+  noLuggage: "打包清單為空",
+  noLuggageDesc: "新增需要攜帶的物品。",
+
+  tripDetails: "旅程詳情", flightNumber: "航班號碼",
+  hotelName: "飯店", transportMode: "交通方式",
+  generalNotes: "一般備註", bannerColor: "橫幅顏色",
+  bannerImage: "橫幅圖片", uploadBanner: "上傳圖片",
+  bannerUrl: "或貼上圖片網址", removeBanner: "移除圖片",
+  airline: "航空公司", departureAirport: "出發機場", arrivalAirport: "抵達機場",
+  departureTime: "出發時間", arrivalTime: "抵達時間", terminal: "航廈",
+  bookingReference: "訂位編號", hotelAddress: "飯店地址", roomType: "房型",
+  checkIn: "入住", checkOut: "退房", confirmationCode: "確認編號",
+  weatherLocationSettings: "天氣位置",
+
+  adminLogin: "管理員登入", adminSetup: "設定管理員密碼",
+  setPassword: "設定密碼",
+  adminTrips: "旅程", adminTravelers: "旅客",
+  adminLuggage: "行李配置", adminWebsite: "網站",
+  adminPassword: "密碼",
+  websiteName: "網站名稱", websiteDesc: "描述",
+  weatherApi: "天氣 API 設定",
+  apiHelp1: "預設使用 Open-Meteo（免費、無需金鑰）。",
+  apiHelp2: "地理編碼網址須包含 {query} 佔位符。",
+  apiHelp3: "預報網址須包含 {lat} 和 {lon} 佔位符。",
+  providerName: "供應商名稱",
+  geocodeUrl: "地理編碼網址範本",
+  forecastUrl: "預報網址範本",
+  resetDefaults: "重設預設值",
+  luggageCfgHelp: "設定新旅程的預設行李類別與物品。",
+  addCategory: "新增類別", categoryName: "類別名稱…",
+  addDefaultItem: "新增預設物品…", removeCategory: "移除類別",
+  saveLuggageCfg: "儲存配置",
+  updatePassword: "更新密碼", newPassword: "新密碼",
+  passwordUpdated: "密碼已更新。", saved: "已儲存！",
+
+  language: "語言", english: "English", chinese: "繁體中文",
+  darkMode: "深色", lightMode: "淺色",
+};
+
+export const translations: Record<Language, typeof en> = { en, zh };
+export type TKey = keyof typeof en;
