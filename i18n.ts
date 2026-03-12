@@ -74,7 +74,7 @@ const en = {
   forecast7: "7-Day Forecast", monthlyHistory: "Monthly History (prev. year)",
   avgHigh: "Avg High", avgLow: "Avg Low", avgRain: "Avg Rain",
 
-  day: "Day", time: "Time", activity: "Activity", stopLocation: "Stop Location", transport: "Transport",
+  day: "Day", time: "Time", activity: "Activity", transport: "Transport",
   details: "Details", addActivity: "Add Activity",
   moveUp: "Up", moveDown: "Down", removeActivity: "Remove",
   noItinerary: "No itinerary items yet",
@@ -204,7 +204,7 @@ const zh: typeof en = {
   forecast7: "7天天氣預報", monthlyHistory: "月均歷史 (去年)",
   avgHigh: "均高", avgLow: "均低", avgRain: "均雨量",
 
-  day: "日", time: "時間", activity: "活動", stopLocation: "停靠地點", transport: "交通方式",
+  day: "日", time: "時間", activity: "活動", transport: "交通方式",
   details: "詳情", addActivity: "新增活動",
   moveUp: "上移", moveDown: "下移", removeActivity: "移除",
   noItinerary: "尚無行程項目",

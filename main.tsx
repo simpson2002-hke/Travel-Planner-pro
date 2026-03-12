@@ -51,7 +51,7 @@ type HotelStay = {
 type TransitLeg = { duration: string; details: string; };
 
 type ItineraryItem = {
-  id: string; day: number; order: number; time: string; title: string; stopLocation: string; transport: string; details: string;
+  id: string; day: number; order: number; time: string; title: string; transport: string; details: string;
   photo?: string; transitToNext?: TransitLeg;
 };
 
@@ -90,7 +90,6 @@ type SiteSettings = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
-const ITINERARY_TRANSPORT_OPTIONS = ["Walk","Public Transit","Taxi","Rideshare","Rental Car","Bike","Train","Flight","Ferry","Other"];
 
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
@@ -217,7 +216,7 @@ function normTrip(i:unknown):Trip{
     bannerColor:t.bannerColor??"#2563eb", bannerImage:t.bannerImage??"",
     members:Array.isArray(t.members)?t.members:[], expenses:Array.isArray(t.expenses)?t.expenses:[],
     packingList:Array.isArray(t.packingList)?t.packingList:[],
-    itinerary:rawItinerary.map((item,index)=>({ ...(item as ItineraryItem), order: typeof (item as ItineraryItem).order === "number" ? (item as ItineraryItem).order : index + 1, stopLocation: (item as ItineraryItem).stopLocation ?? "", photo: (item as ItineraryItem).photo ?? "", transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" } })),
+    itinerary:rawItinerary.map((item,index)=>({ ...(item as ItineraryItem), order: typeof (item as ItineraryItem).order === "number" ? (item as ItineraryItem).order : index + 1, photo: (item as ItineraryItem).photo ?? "", transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" } })),
     createdAt:t.createdAt??new Date().toISOString(),
     customLocation:t.customLocation };
 }
@@ -939,7 +938,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
               <p className={cx("mt-3 text-xl font-medium",th==="dark"?"text-slate-200":"text-slate-700")}>{trip.location}</p>
               <p className={cx("mt-2 max-w-2xl text-base",th==="dark"?"text-slate-400":"text-slate-500")}>{fmtDate(trip.startDate)} - {fmtDate(trip.endDate)}</p>
             </div>
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("dates")}</p>
                 <p className="mt-2 text-lg font-semibold leading-snug">{fmtDate(trip.startDate)}<br />{fmtDate(trip.endDate)}</p>
@@ -950,11 +949,13 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
               </div>
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
-                <p className="mt-2 text-lg font-semibold">{flightLegs.length || 0} {flightLegs.length===1?t("flightDetails"):t("flightLegs")}</p>
+                <p className="mt-2 text-lg font-semibold">{flightLegs.length || 0}</p>
+                <p className={cx("mt-1 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tripFlightSummary(trip).join(" · ") || t("noFlightDetails")}</p>
               </div>
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("hotelDetails")}</p>
-                <p className="mt-2 text-lg font-semibold">{hotels.length || 0} {hotels.length===1?t("hotelDetails"):t("hotelStays")}</p>
+                <p className="mt-2 text-lg font-semibold">{hotels.length || 0}</p>
+                <p className={cx("mt-1 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tripHotelSummary(trip).join(" · ") || t("noHotelDetails")}</p>
               </div>
             </div>
           </div>
@@ -990,7 +991,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
             <Badge label={`${flightLegs.length}`} th={th} color="blue"/>
           </div>
           {flightLegs.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noFlightDetails")}</p>
-          :<div className="space-y-5">{flightLegs.map((leg,index)=><div key={leg.id} className={cx("rounded-[1.75rem] border p-6",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          :<div className="space-y-4">{flightLegs.map((leg,index)=><div key={leg.id} className={cx("rounded-[1.75rem] border p-6",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-2xl font-bold">{leg.departureAirport || "-"}{" -> "}{leg.arrivalAirport || "-"}</p>
@@ -998,7 +999,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
               </div>
               <Badge label={`${t("flightDetails")} ${index+1}`} th={th} color="blue"/>
             </div>
-            <div className="mt-5 grid md:grid-cols-3 gap-3 text-sm">
+            <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-3 text-sm">
               <InfoRow label={t("departureTime")} value={leg.departureTime ? fmtDate(leg.departureTime) : "—"} th={th}/>
               <InfoRow label={t("arrivalTime")} value={leg.arrivalTime ? fmtDate(leg.arrivalTime) : "—"} th={th}/>
               <InfoRow label={t("terminal")} value={leg.terminal || "—"} th={th}/>
@@ -1019,7 +1020,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
             <Badge label={`${hotels.length}`} th={th} color="green"/>
           </div>
           {hotels.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noHotelDetails")}</p>
-          :<div className="space-y-5">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.75rem] border p-6",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          :<div className="space-y-4">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.75rem] border p-6",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-2xl font-bold">{hotel.hotelName || `${t("hotelDetails")} ${index+1}`}</p>
@@ -1027,7 +1028,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
               </div>
               <Badge label={`${t("hotelDetails")} ${index+1}`} th={th} color="green"/>
             </div>
-            <div className="mt-5 grid md:grid-cols-2 gap-3 text-sm">
+            <div className="mt-5 grid sm:grid-cols-2 gap-x-5 gap-y-3 text-sm">
               <InfoRow label={t("roomType")} value={hotel.roomType || "—"} th={th}/>
               <InfoRow label={t("propertyContact")} value={hotel.contact || "—"} th={th}/>
               <InfoRow label={t("checkIn")} value={hotel.checkIn ? fmtDate(hotel.checkIn) : "—"} th={th}/>
@@ -1161,7 +1162,7 @@ function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:The
 }
 
 function TripItinerary({trip,th,t,onUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void}){
-  const emptyForm={time:"09:00",title:"",stopLocation:"",transport:"Walk",details:"",photo:""};
+  const emptyForm={time:"09:00",title:"",transport:"Walk",details:"",photo:""};
   const [day,setDay]=useState(1);
   const [form,setForm]=useState(emptyForm);
   const [editId,setEditId]=useState<string|null>(null);
@@ -1174,7 +1175,7 @@ function TripItinerary({trip,th,t,onUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>
   const saveActivity=(e:React.FormEvent)=>{
     e.preventDefault();
     if(!form.title.trim())return;
-    const payload={ time:form.time,title:form.title,stopLocation:form.stopLocation,transport:form.transport,details:form.details,photo:form.photo };
+    const payload={ time:form.time,title:form.title,transport:form.transport,details:form.details,photo:form.photo };
     if(editId){
       onUpdate(trip.id,trip.itinerary.map(it=>it.id===editId?{...it,...payload,day}:it));
       setEditId(null);
@@ -1201,7 +1202,7 @@ function TripItinerary({trip,th,t,onUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>
   };
 
   const edit=(it:ItineraryItem)=>{
-    setForm({ time:it.time,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"" });
+    setForm({ time:it.time,title:it.title,transport:it.transport,details:it.details,photo:it.photo??"" });
     setEditId(it.id);
     setDay(it.day);
   };
@@ -1259,7 +1260,6 @@ function TripItinerary({trip,th,t,onUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>
                     </div>
                     <Badge label={it.transport} th={th}/>
                   </div>
-                  {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                   {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
                   {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-48 w-full rounded-2xl border border-white/10 object-cover"/>}
                 </div>
@@ -1304,10 +1304,7 @@ function TripItinerary({trip,th,t,onUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>
       <form onSubmit={saveActivity} className="space-y-3">
         <Input th={th} label={t("time")} type="time" value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))}/>
         <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
-        <Input th={th} label={t("stopLocation")} value={form.stopLocation} onChange={e=>setForm(f=>({...f,stopLocation:e.target.value}))}/>
-        <Select th={th} label={t("transport")} value={form.transport} onChange={e=>setForm(f=>({...f,transport:e.target.value}))}>
-          {ITINERARY_TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}
-        </Select>
+        <Input th={th} label={t("transport")} value={form.transport} onChange={e=>setForm(f=>({...f,transport:e.target.value}))}/>
         <Textarea th={th} label={t("details")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
         <div className="space-y-2">
           <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>
@@ -1719,6 +1716,7 @@ function TripSettings({trip,isOwner,th,t,onUpdate}:{trip:Trip;isOwner:boolean;th
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card th={th} className="p-6 space-y-4">
+          <Input th={th} label={t("transportMode")} value={form.transportMode} onChange={e=>setForm(f=>({...f,transportMode:e.target.value}))}/>
           <Textarea th={th} label={t("generalNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
         </Card>
 
