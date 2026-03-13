@@ -17,7 +17,6 @@ type UserSection = "dashboard" | "trips";
 type Profile = {
   id: string; accountName: string; firstName: string; lastName: string;
   email: string; phone: string; password: string;
-  dateOfBirth?: string;
   nationality?: string; passportNumber?: string; passportExpiryDate?: string; dietaryNotes?: string;
   emergencyContact?: string; homeAirport?: string;
 };
@@ -148,9 +147,6 @@ const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
 const fmtDate = (v:string)=>v ? new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
 const fmtCur = (n:number,c="USD")=>new Intl.NumberFormat("en-US",{style:"currency",currency:c,maximumFractionDigits:2}).format(n);
-const upper = (v:string)=>v.trim().toUpperCase();
-const normalizeName = (v:string)=>upper(v);
-const normalizeAirport = (v:string)=>upper(v).slice(0,3);
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -173,10 +169,10 @@ function buildUrl(tpl:string,rep:Record<string,string|number>){
 
 function normProfile(i:unknown):Profile{
   const p=(i??{}) as Partial<Profile>;
-  return { id:p.id??uid("u"), accountName:upper(p.accountName??""), firstName:normalizeName(p.firstName??""),
-    lastName:normalizeName(p.lastName??""), email:p.email??"", phone:p.phone??"", password:p.password??"", dateOfBirth:p.dateOfBirth??"",
+  return { id:p.id??uid("u"), accountName:p.accountName??"", firstName:p.firstName??"",
+    lastName:p.lastName??"", email:p.email??"", phone:p.phone??"", password:p.password??"",
     nationality:p.nationality??"", passportNumber:p.passportNumber??"", passportExpiryDate:p.passportExpiryDate??"",
-    dietaryNotes:p.dietaryNotes??"", emergencyContact:p.emergencyContact??"", homeAirport:normalizeAirport(p.homeAirport??"HKG")||"HKG" };
+    dietaryNotes:p.dietaryNotes??"", emergencyContact:p.emergencyContact??"", homeAirport:p.homeAirport??"" };
 }
 
 function normTrip(i:unknown):Trip{
@@ -393,15 +389,7 @@ function readFile(file:File):Promise<string>{
 
 
 function meetsPasswordPolicy(password:string){
-  return password.length>=8;
-}
-
-function isPhoneValid(phone:string){
-  return /^\d{8}$/.test(phone.trim());
-}
-
-function isFourDigitCode(v:string){
-  return /^\d{4}$/.test(v.trim());
+  return password.length>3 && /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
 }
 
 async function searchFlightByNumber(siteCfg:SiteSettings,flightNumber:string,date?:string){
@@ -599,8 +587,8 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
   onSignIn:(i:string,p:string)=>{ok:boolean;message:string};
   onSignUp:(d:Omit<Profile,"id">)=>{ok:boolean;message:string};onToggle:()=>void;
 }){
-  const [form,setForm]=useState({accountName:"",accountDigits:"",firstName:"",lastName:"",email:"",phone:"",password:"",password2:"",
-    dateOfBirth:"",nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:"HKG"});
+  const [form,setForm]=useState({accountName:"",firstName:"",lastName:"",email:"",phone:"",password:"",password2:"",
+    nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:""});
   const [ident,setIdent]=useState("");
   const [pw,setPw]=useState("");
   const [err,setErr]=useState("");
@@ -616,17 +604,13 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
     if(!form.accountName.trim()||!form.firstName.trim()||!form.lastName.trim()||!form.email.trim()||!form.phone.trim()||!form.password.trim()){
       setErr("Please fill in all required fields.");return;
     }
-    if(!isFourDigitCode(form.accountDigits)){setErr(t("accountDigitsRule"));return;}
-    if(!isPhoneValid(form.phone)){setErr(t("phoneRule"));return;}
     if(form.password!==form.password2){setErr(t("passwordMismatch"));return;}
     if(!meetsPasswordPolicy(form.password)){setErr(t("passwordPolicy"));return;}
     const res=onSignUp({
-      accountName:`${upper(form.accountName)}${form.accountDigits.trim()}`,
-      firstName:normalizeName(form.firstName),lastName:normalizeName(form.lastName),
+      accountName:form.accountName.trim(),firstName:form.firstName.trim(),lastName:form.lastName.trim(),
       email:form.email.trim(),phone:form.phone.trim(),password:form.password,
-      dateOfBirth:form.dateOfBirth,
       nationality:form.nationality.trim(),passportNumber:form.passportNumber.trim(),passportExpiryDate:form.passportExpiryDate,
-      dietaryNotes:form.dietaryNotes.trim(),emergencyContact:form.emergencyContact.trim(),homeAirport:normalizeAirport(form.homeAirport)||"HKG"
+      dietaryNotes:form.dietaryNotes.trim(),emergencyContact:form.emergencyContact.trim(),homeAirport:form.homeAirport.trim()
     });
     if(!res.ok){setErr(res.message);}else{onClose();}
   };
@@ -634,7 +618,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
   return <Modal open={open} onClose={onClose} th={th} title={mode==="signin"?t("signIn"):t("signUp")}>
     {mode==="signin"?<form onSubmit={handleSignIn} className="space-y-4">
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("signInDesc")}</p>
-      <Input th={th} label={t("accountOrEmail")} placeholder={t("accountOrEmailHint")} value={ident} onChange={e=>setIdent(e.target.value)}/>
+      <Input th={th} label={t("accountOrEmail")} value={ident} onChange={e=>setIdent(e.target.value)}/>
       <Input th={th} label={t("password")} type="password" value={pw} onChange={e=>setPw(e.target.value)}/>
       {err&&<p className="text-rose-400 text-sm">{err}</p>}
       <div className="flex gap-3">
@@ -642,37 +626,23 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
         <Btn th={th} v="sec" type="button" onClick={onToggle}>{t("signUp")}</Btn>
       </div>
     </form>:<form onSubmit={handleSignUp} className="space-y-4">
-      <div className={cx("rounded-2xl border p-4",th==="dark"?"border-cyan-400/30 bg-cyan-500/10":"border-blue-200 bg-blue-50")}>
-        <p className={cx("text-sm font-semibold mb-2",th==="dark"?"text-cyan-200":"text-blue-700")}>{t("signupInstructions")}</p>
-        <ul className={cx("text-sm list-disc pl-5 space-y-1",th==="dark"?"text-slate-300":"text-slate-700")}>
-          <li>{t("signupRuleName")}</li>
-          <li>{t("signupRuleAccount")}</li>
-          <li>{t("signupRulePhone")}</li>
-          <li>{t("signupRulePassword")}</li>
-          <li>{t("signupRuleAirport")}</li>
-        </ul>
-      </div>
+      <Input th={th} label={`${t("accountName")} *`} value={form.accountName} onChange={e=>setForm(f=>({...f,accountName:e.target.value}))}/>
       <div className="grid grid-cols-2 gap-3">
-        <Input th={th} label={`${t("accountName")} *`} placeholder={t("accountNameHint")} value={form.accountName} onChange={e=>setForm(f=>({...f,accountName:upper(e.target.value)}))}/>
-        <Input th={th} label={t("accountDigits")} placeholder={t("accountDigitsHint")} maxLength={4} value={form.accountDigits} onChange={e=>setForm(f=>({...f,accountDigits:e.target.value.replace(/\D/g,"").slice(0,4)}))}/>
+        <Input th={th} label={`${t("firstName")} *`} value={form.firstName} onChange={e=>setForm(f=>({...f,firstName:e.target.value}))}/>
+        <Input th={th} label={`${t("lastName")} *`} value={form.lastName} onChange={e=>setForm(f=>({...f,lastName:e.target.value}))}/>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Input th={th} label={`${t("firstName")} *`} placeholder={t("nameHint")} value={form.firstName} onChange={e=>setForm(f=>({...f,firstName:upper(e.target.value)}))}/>
-        <Input th={th} label={`${t("lastName")} *`} placeholder={t("nameHint")} value={form.lastName} onChange={e=>setForm(f=>({...f,lastName:upper(e.target.value)}))}/>
-      </div>
-      <Input th={th} label={`${t("email")} *`} type="email" placeholder="name@example.com" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))}/>
-      <Input th={th} label={`${t("phone")} *`} placeholder={t("phoneHint")} maxLength={8} value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value.replace(/\D/g,"").slice(0,8)}))}/>
-      <Input th={th} label={`${t("password")} *`} type="password" placeholder={t("passwordHint")} value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))}/>
-      <Input th={th} label={`${t("confirmPassword")} *`} type="password" placeholder={t("passwordHint")} value={form.password2} onChange={e=>setForm(f=>({...f,password2:e.target.value}))}/>
+      <Input th={th} label={`${t("email")} *`} type="email" value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))}/>
+      <Input th={th} label={`${t("phone")} *`} value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))}/>
+      <Input th={th} label={`${t("password")} *`} type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))}/>
+      <Input th={th} label={`${t("confirmPassword")} *`} type="password" value={form.password2} onChange={e=>setForm(f=>({...f,password2:e.target.value}))}/>
       <details className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
         <summary className="cursor-pointer font-medium mb-2">{t("optional")}</summary>
         <div className="space-y-3 mt-3">
           <Input th={th} label={t("nationality")} value={form.nationality} onChange={e=>setForm(f=>({...f,nationality:e.target.value}))}/>
           <Input th={th} label={t("passport")} value={form.passportNumber} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
-          <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
           <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
           <Input th={th} label={t("emergencyContact")} value={form.emergencyContact} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
-          <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
+          <Input th={th} label={t("homeAirport")} value={form.homeAirport} onChange={e=>setForm(f=>({...f,homeAirport:e.target.value}))}/>
           <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
         </div>
       </details>
@@ -748,7 +718,6 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
           <InfoRow label={t("lastName")} value={user.lastName || "—"} th={th}/>
           <InfoRow label={t("email")} value={user.email || "—"} th={th}/>
           <InfoRow label={t("phone")} value={user.phone || "—"} th={th}/>
-          <InfoRow label={t("dateOfBirth")} value={user.dateOfBirth ? fmtDate(user.dateOfBirth) : "—"} th={th}/>
           <InfoRow label={t("nationality")} value={user.nationality || "—"} th={th}/>
           <InfoRow label={t("passport")} value={user.passportNumber || "—"} th={th}/>
           <InfoRow label={t("passportExpiry")} value={user.passportExpiryDate ? fmtDate(user.passportExpiryDate) : "—"} th={th}/>
@@ -757,18 +726,17 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
           <InfoRow label={t("dietaryNotes")} value={user.dietaryNotes || "—"} th={th}/>
         </div>
       </div>:<div className="space-y-3">
-        <Input th={th} label={t("accountName")} placeholder={t("accountNameHint")} value={form.accountName} onChange={e=>setForm(f=>({...f,accountName:upper(e.target.value)}))}/>
+        <Input th={th} label={t("accountName")} value={form.accountName} onChange={e=>setForm(f=>({...f,accountName:e.target.value}))}/>
         <div className="grid grid-cols-2 gap-3">
-          <Input th={th} label={t("firstName")} placeholder={t("nameHint")} value={form.firstName} onChange={e=>setForm(f=>({...f,firstName:upper(e.target.value)}))}/>
-          <Input th={th} label={t("lastName")} placeholder={t("nameHint")} value={form.lastName} onChange={e=>setForm(f=>({...f,lastName:upper(e.target.value)}))}/>
+          <Input th={th} label={t("firstName")} value={form.firstName} onChange={e=>setForm(f=>({...f,firstName:e.target.value}))}/>
+          <Input th={th} label={t("lastName")} value={form.lastName} onChange={e=>setForm(f=>({...f,lastName:e.target.value}))}/>
         </div>
         <Input th={th} label={t("email")} value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))}/>
-        <Input th={th} label={t("phone")} placeholder={t("phoneHint")} maxLength={8} value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value.replace(/\D/g,"").slice(0,8)}))}/>
+        <Input th={th} label={t("phone")} value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))}/>
         <Input th={th} label={t("nationality")} value={form.nationality||""} onChange={e=>setForm(f=>({...f,nationality:e.target.value}))}/>
         <Input th={th} label={t("passport")} value={form.passportNumber||""} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
-        <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth||""} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
         <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate||""} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
-        <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport||""} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
+        <Input th={th} label={t("homeAirport")} value={form.homeAirport||""} onChange={e=>setForm(f=>({...f,homeAirport:e.target.value}))}/>
         <Input th={th} label={t("emergencyContact")} value={form.emergencyContact||""} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
         <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes||""} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
       </div>}
@@ -2244,16 +2212,11 @@ export function App(){
   };
 
   const handleSignUp=(d:Omit<Profile,"id">)=>{
-    const accountName=upper(d.accountName);
-    const phone=d.phone.trim();
     if(profiles.some(p=>p.email.toLowerCase()===d.email.trim().toLowerCase()))return{ok:false,message:t("emailExists")};
-    if(!isPhoneValid(phone))return{ok:false,message:t("phoneRule")};
-    if(profiles.some(p=>p.phone.trim()===phone))return{ok:false,message:t("phoneExists")};
-    if(!/^[A-Z]+\d{4}$/.test(accountName))return{ok:false,message:t("accountNameRule")};
-    if(profiles.some(p=>p.accountName.toLowerCase()===accountName.toLowerCase()))return{ok:false,message:t("accountExists")};
+    if(profiles.some(p=>p.phone.trim()===d.phone.trim()))return{ok:false,message:t("phoneExists")};
+    if(profiles.some(p=>p.accountName.toLowerCase()===d.accountName.trim().toLowerCase()))return{ok:false,message:t("accountExists")};
     if(!meetsPasswordPolicy(d.password))return{ok:false,message:t("passwordPolicy")};
-    const p:Profile={...d,id:uid("u"),accountName,firstName:normalizeName(d.firstName),lastName:normalizeName(d.lastName),phone,homeAirport:normalizeAirport(d.homeAirport??"HKG")||"HKG"};
-    setProfiles(c=>[...c,p]);setUserId(p.id);return{ok:true,message:"OK"};
+    const p:Profile={...d,id:uid("u")};setProfiles(c=>[...c,p]);setUserId(p.id);return{ok:true,message:"OK"};
   };
 
   const createTrip=(d:{title:string;location:string;startDate:string;endDate:string})=>{
@@ -2329,13 +2292,7 @@ export function App(){
       siteCfg={siteCfg} setSiteCfg={setSiteCfg} onDeleteTrip={deleteTrip} onDeleteTraveler={deleteTraveler}/>}
 
     {view==="user"&&user&&<UserWorkspace user={user} trips={trips} profiles={profiles} siteCfg={siteCfg} th={theme} t={t}
-      onUpdate={d=>setProfiles(c=>c.map(p=>p.id===user.id?{...p,...d,
-        accountName: d.accountName!==undefined ? upper(d.accountName) : p.accountName,
-        firstName: d.firstName!==undefined ? normalizeName(d.firstName) : p.firstName,
-        lastName: d.lastName!==undefined ? normalizeName(d.lastName) : p.lastName,
-        phone: d.phone!==undefined ? d.phone.replace(/\D/g,"").slice(0,8) : p.phone,
-        homeAirport: d.homeAirport!==undefined ? (normalizeAirport(d.homeAirport)||"HKG") : p.homeAirport,
-      }:p))}
+      onUpdate={d=>setProfiles(c=>c.map(p=>p.id===user.id?{...p,...d}:p))}
       onCreate={createTrip} onJoin={joinTrip} onTripUpdate={updateTrip}
       onAddExp={addExpense} onAddPack={addPack} onTogglePack={togglePack} onRemovePack={removePack} onUpdateItin={updateItin} onRemoveExp={removeExpense}/>}
 
