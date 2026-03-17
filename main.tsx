@@ -188,11 +188,15 @@ async function cloudStorageRequest(endpoint:string,action:string,key:string,valu
 
 function useSharedPersist<T>(key:string,init:T){
   const [s,set]=usePersist<T>(key,init);
+  const [cloudReady,setCloudReady]=useState(!CLOUD_SHARED_KEYS.has(key) || !getCloudWorkerEndpoint());
 
   useEffect(()=>{
     if(!CLOUD_SHARED_KEYS.has(key)) return;
     const endpoint=getCloudWorkerEndpoint();
-    if(!endpoint) return;
+    if(!endpoint){
+      setCloudReady(true);
+      return;
+    }
     let cancelled=false;
     (async()=>{
       try{
@@ -201,6 +205,9 @@ function useSharedPersist<T>(key:string,init:T){
         if(r?.exists) set(r.value as T);
         else await cloudStorageRequest(endpoint,"set",key,s);
       }catch{}
+      finally{
+        if(!cancelled) setCloudReady(true);
+      }
     })();
     return ()=>{cancelled=true;};
     // run only once on mount
@@ -211,8 +218,9 @@ function useSharedPersist<T>(key:string,init:T){
     if(!CLOUD_SHARED_KEYS.has(key)) return;
     const endpoint=getCloudWorkerEndpoint();
     if(!endpoint) return;
+    if(!cloudReady) return;
     cloudStorageRequest(endpoint,"set",key,s).catch(()=>{});
-  },[key,s]);
+  },[cloudReady,key,s]);
 
   return [s,set] as const;
 }
