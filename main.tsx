@@ -179,12 +179,15 @@ function usePersist<T>(key:string,init:T){
 }
 
 const CLOUD_DEVICE_ID_KEY = "tp-cloud-device-id";
+const CLOUD_WORKER_ENDPOINT_KEY = "tp-cloud-worker-endpoint";
 const CLOUD_CF_ACCOUNT_ID_KEY = "tp-cloudflare-account-id";
 const CLOUD_D1_DATABASE_ID_KEY = "tp-cloudflare-d1-database-id";
 const CLOUD_CF_API_TOKEN_KEY = "tp-cloudflare-api-token";
+const DEFAULT_CLOUDFLARE_WORKER_ENDPOINT = "https://travel-planner-ai-storage.simpsonlee71.workers.dev";
 const DEFAULT_CLOUDFLARE_ACCOUNT_ID = "64ba8506f5d201ceed54c05d58743ce4";
 const DEFAULT_CLOUDFLARE_D1_DATABASE_ID = "f46d6590-0fec-4df0-b31e-49dbf4b25476";
 const DEFAULT_CLOUDFLARE_API_TOKEN = "cfut_DNH2yHaUgo4LdhY9E2MKOfSslbVnjOzip9SuJheQ940ba29c";
+const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT ?? DEFAULT_CLOUDFLARE_WORKER_ENDPOINT).trim();
 const DEPLOYED_CLOUDFLARE_ACCOUNT_ID = (import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID ?? DEFAULT_CLOUDFLARE_ACCOUNT_ID).trim();
 const DEPLOYED_CLOUDFLARE_D1_DATABASE_ID = (import.meta.env.VITE_CLOUDFLARE_D1_DATABASE_ID ?? DEFAULT_CLOUDFLARE_D1_DATABASE_ID).trim();
 const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN ?? DEFAULT_CLOUDFLARE_API_TOKEN).trim();
@@ -218,6 +221,24 @@ function setCloudD1Config(config:CloudD1Config){
   localStorage.setItem(CLOUD_CF_API_TOKEN_KEY,config.apiToken.trim());
 }
 
+function getCloudWorkerEndpoint(){
+  try{
+    const override = localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY)?.trim();
+    return override || DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+  }catch{
+    return DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+  }
+}
+
+function setCloudWorkerEndpoint(endpoint:string){
+  const next = endpoint.trim();
+  if(next){
+    localStorage.setItem(CLOUD_WORKER_ENDPOINT_KEY,next);
+    return;
+  }
+  localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
+}
+
 async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[]){
   if(!config.accountId || !config.databaseId || !config.apiToken){
     throw new Error("Cloudflare D1 config missing. Set account id, database id, and API token.");
@@ -247,13 +268,14 @@ async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[])
 }
 
 async function ensureCloudD1Schema(config:CloudD1Config){
-  await cloudD1Query(config,`
-    CREATE TABLE IF NOT EXISTS ai_storage (
-      storage_key TEXT PRIMARY KEY,
-      storage_value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
+  await cloudD1Query(
+    config,
+    "CREATE TABLE IF NOT EXISTS ai_storage (storage_key TEXT PRIMARY KEY, storage_value TEXT NOT NULL, updated_at TEXT NOT NULL);"
+  );
+  await cloudD1Query(
+    config,
+    "CREATE INDEX IF NOT EXISTS idx_ai_storage_updated_at ON ai_storage(updated_at);"
+  );
 }
 
 async function verifyCloudD1Config(config:CloudD1Config){
@@ -261,40 +283,81 @@ async function verifyCloudD1Config(config:CloudD1Config){
   await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
+async function verifyCloudWorkerEndpoint(){
+  const endpoint = getCloudWorkerEndpoint();
+  if(!endpoint) throw new Error("Cloud worker endpoint missing.");
+  const response = await fetch(endpoint,{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+  });
+  const payload = await response.json();
+  if(!response.ok || payload?.ok !== true){
+    throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
+  }
+}
+
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
-  const config = getCloudD1Config();
-  await ensureCloudD1Schema(config);
+  const workerEndpoint = getCloudWorkerEndpoint();
+  const workerErrors: string[] = [];
 
-  if(action==="set"){
-    const now = new Date().toISOString();
-    await cloudD1Query(
-      config,
-      `INSERT INTO ai_storage (storage_key, storage_value, updated_at)
-       VALUES (?1, ?2, ?3)
-       ON CONFLICT(storage_key) DO UPDATE SET storage_value=excluded.storage_value, updated_at=excluded.updated_at`,
-      [key, JSON.stringify(value), now]
-    );
-    return { key, value };
-  }
-
-  if(action==="get"){
-    const result = await cloudD1Query(
-      config,
-      "SELECT storage_value FROM ai_storage WHERE storage_key = ?1 LIMIT 1",
-      [key]
-    );
-    const row = result?.results?.[0] as { storage_value?: string } | undefined;
-    if(!row || typeof row.storage_value !== "string"){
-      return { key, value: undefined, exists: false };
-    }
+  if(workerEndpoint){
     try{
-      return { key, value: JSON.parse(row.storage_value), exists: true };
-    }catch{
-      return { key, value: row.storage_value, exists: true };
+      const resp = await fetch(workerEndpoint,{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({ id:crypto.randomUUID(), action, key, value }),
+      });
+      const payload = await resp.json();
+      if(!resp.ok || payload?.ok !== true){
+        throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
+      }
+      return payload?.data;
+    }catch(error){
+      workerErrors.push(error instanceof Error ? error.message : "Unknown worker fetch error.");
     }
   }
 
-  throw new Error(`Unsupported cloud storage action: ${action}`);
+  const config = getCloudD1Config();
+  if(config.accountId && config.databaseId && config.apiToken){
+    await ensureCloudD1Schema(config);
+
+    if(action==="set"){
+      const now = new Date().toISOString();
+      await cloudD1Query(
+        config,
+        `INSERT INTO ai_storage (storage_key, storage_value, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(storage_key) DO UPDATE SET storage_value=excluded.storage_value, updated_at=excluded.updated_at`,
+        [key, JSON.stringify(value), now]
+      );
+      return { key, value };
+    }
+
+    if(action==="get"){
+      const result = await cloudD1Query(
+        config,
+        "SELECT storage_value FROM ai_storage WHERE storage_key = ?1 LIMIT 1",
+        [key]
+      );
+      const row = result?.results?.[0] as { storage_value?: string } | undefined;
+      if(!row || typeof row.storage_value !== "string"){
+        return { key, value: undefined, exists: false };
+      }
+      try{
+        return { key, value: JSON.parse(row.storage_value), exists: true };
+      }catch{
+        return { key, value: row.storage_value, exists: true };
+      }
+    }
+  }
+
+  if(action!=="set" && action!=="get"){
+    throw new Error(`Unsupported cloud storage action: ${action}`);
+  }
+
+  const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[0]}` : "";
+  throw new Error(`Cloud sync failed: unable to reach worker or D1 configuration is incomplete.${workerMessage}`);
 }
 
 function getCloudDeviceId(){
@@ -418,7 +481,7 @@ function useSharedPersist<T>(key:string,init:T){
           }
         }catch{}
       }
-      if(event.key === CLOUD_CF_ACCOUNT_ID_KEY || event.key === CLOUD_D1_DATABASE_ID_KEY || event.key === CLOUD_CF_API_TOKEN_KEY){
+      if(event.key === CLOUD_WORKER_ENDPOINT_KEY || event.key === CLOUD_CF_ACCOUNT_ID_KEY || event.key === CLOUD_D1_DATABASE_ID_KEY || event.key === CLOUD_CF_API_TOKEN_KEY){
         syncNow();
       }
     };
@@ -2918,15 +2981,19 @@ function AdminWebsite({th,t,settings,onSave}:{th:ThemeMode;t:(k:TKey)=>string;se
 
 function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<void>|void}){
   const initial = useMemo(()=>getCloudD1Config(),[]);
+  const [workerEndpoint,setWorkerEndpoint] = useState(()=>getCloudWorkerEndpoint());
   const [accountId,setAccountId] = useState(initial.accountId);
   const [databaseId,setDatabaseId] = useState(initial.databaseId);
   const [apiToken,setApiToken] = useState(initial.apiToken);
   const [busy,setBusy] = useState(false);
+  const [testing,setTesting] = useState(false);
+  const [d1Testing,setD1Testing] = useState(false);
   const [msg,setMsg] = useState("");
   const [err,setErr] = useState("");
 
   const fillFromStored = ()=>{
     const existing = getCloudD1Config();
+    setWorkerEndpoint(getCloudWorkerEndpoint());
     setAccountId(existing.accountId);
     setDatabaseId(existing.databaseId);
     setApiToken(existing.apiToken);
@@ -2940,40 +3007,105 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       databaseId: databaseId.trim(),
       apiToken: apiToken.trim(),
     };
-    if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
-      setErr("All 3 Cloudflare fields are required.");
-      setMsg("");
-      return;
-    }
-
     setBusy(true);
     setErr("");
     setMsg("");
     try{
+      setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
-      await verifyCloudD1Config(nextConfig);
+      if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
+        await verifyCloudD1Config(nextConfig);
+        setMsg("✅ Cloudflare D1 credentials saved and verified. Sync is active on this device.");
+      }else{
+        await verifyCloudWorkerEndpoint();
+        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials can stay blank when worker mode is used.");
+      }
       if(onSaved) await onSaved();
-      setMsg("✅ Cloud sync credentials saved and verified. Sync is active on this device.");
     }catch(error){
-      setErr(error instanceof Error ? error.message : "Failed to verify cloud sync credentials.");
+      setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
     }finally{
       setBusy(false);
+    }
+  };
+
+  const runWorkerCorsSelfTest = async()=>{
+    const endpoint = workerEndpoint.trim();
+    if(!endpoint){
+      setErr("Please enter a Worker endpoint first.");
+      setMsg("");
+      return;
+    }
+
+    setTesting(true);
+    setErr("");
+    setMsg("");
+
+    try{
+      const optionsResp = await fetch(endpoint,{ method:"OPTIONS" });
+      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
+      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
+      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
+
+      const postResp = await fetch(endpoint,{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+      });
+      const postPayload = await postResp.json();
+
+      if(!postResp.ok || postPayload?.ok !== true){
+        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
+      }
+
+      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
+    }finally{
+      setTesting(false);
+    }
+  };
+
+  const runD1SchemaTest = async()=>{
+    const nextConfig: CloudD1Config = {
+      accountId: accountId.trim(),
+      databaseId: databaseId.trim(),
+      apiToken: apiToken.trim(),
+    };
+    if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
+      setErr("Enter Cloudflare Account ID, D1 Database ID, and API Token before running D1 schema test.");
+      setMsg("");
+      return;
+    }
+
+    setD1Testing(true);
+    setErr("");
+    setMsg("");
+    try{
+      await verifyCloudD1Config(nextConfig);
+      setMsg("✅ D1 schema test passed (CREATE TABLE/INDEX + SELECT 1). D1 fallback is healthy.");
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "D1 schema test failed.");
+    }finally{
+      setD1Testing(false);
     }
   };
 
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      Configure the 3 Cloudflare values directly in the app. Save will test D1 immediately so users do not need devtools.
+      Preferred mode uses the Cloudflare Worker endpoint automatically. Optional D1 credentials below are only needed for direct D1 fallback.
     </p>
+    <Input th={th} label="Cloudflare Worker Endpoint" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder="https://your-worker.workers.dev"/>
     <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
     <Input th={th} label="Cloudflare D1 Database ID" value={databaseId} onChange={e=>setDatabaseId(e.target.value)}/>
     <Input th={th} label="Cloudflare API Token" type="password" value={apiToken} onChange={e=>setApiToken(e.target.value)}/>
     {msg&&<p className="text-emerald-400 text-sm">{msg}</p>}
     {err&&<p className="text-rose-400 text-sm break-words">{err}</p>}
     <div className="flex flex-wrap gap-2">
-      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy}>{busy?"Saving…":"Save & Verify"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy}>Load Saved</Btn>
+      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
 }
@@ -3132,10 +3264,13 @@ export function App(){
                 <p className="mt-1 break-words">{syncStatusMessage}</p>
                 <p className="mt-2">Possible fixes: confirm both devices use the same app URL, clear any stale cloud endpoint override in local storage, and verify the Cloudflare D1 database credentials are valid.</p>
               </div>}
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <Btn th={theme} onClick={()=>{refreshSharedSync().catch(()=>{});}} disabled={manualSyncing}>
                   {manualSyncing ? "Syncing…" : "Retry Sync"}
                 </Btn>
+                <p className={cx("text-sm",theme==="dark"?"text-slate-400":"text-slate-500")}>
+                  Auto-sync still runs every 15 seconds and on focus/online.
+                </p>
               </div>
             </Card>
           </div>
