@@ -3024,7 +3024,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
     }finally{
-      setBusy(false);
+      setD1Testing(false);
     }
   };
 
@@ -3066,23 +3066,46 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   };
 
   const runD1SchemaTest = async()=>{
-    const nextConfig: CloudD1Config = {
-      accountId: accountId.trim(),
-      databaseId: databaseId.trim(),
-      apiToken: apiToken.trim(),
-    };
-    if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
-      setErr("Enter Cloudflare Account ID, D1 Database ID, and API Token before running D1 schema test.");
-      setMsg("");
-      return;
-    }
-
     setD1Testing(true);
     setErr("");
     setMsg("");
     try{
-      await verifyCloudD1Config(nextConfig);
-      setMsg("✅ D1 schema test passed (CREATE TABLE/INDEX + SELECT 1). D1 fallback is healthy.");
+      const endpoint = workerEndpoint.trim();
+      if(endpoint){
+        const testKey = `tp-d1-self-test-${Date.now()}`;
+        const setResp = await fetch(endpoint,{
+          method:"POST",
+          headers:{"content-type":"application/json"},
+          body:JSON.stringify({ id:crypto.randomUUID(), action:"set", key:testKey, value:{ ok:true, t:Date.now() } }),
+        });
+        const setPayload = await setResp.json();
+        if(!setResp.ok || setPayload?.ok !== true){
+          throw new Error(setPayload?.error ?? `Worker D1 set test failed (${setResp.status})`);
+        }
+
+        const getResp = await fetch(endpoint,{
+          method:"POST",
+          headers:{"content-type":"application/json"},
+          body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:testKey }),
+        });
+        const getPayload = await getResp.json();
+        const data = getPayload?.data;
+        if(!getResp.ok || getPayload?.ok !== true || data?.exists !== true){
+          throw new Error(getPayload?.error ?? `Worker D1 get test failed (${getResp.status})`);
+        }
+        setMsg("✅ D1 schema/storage test passed via Worker endpoint (set/get succeeded).");
+      }else{
+        const nextConfig: CloudD1Config = {
+          accountId: accountId.trim(),
+          databaseId: databaseId.trim(),
+          apiToken: apiToken.trim(),
+        };
+        if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
+          throw new Error("Enter Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 test.");
+        }
+        await verifyCloudD1Config(nextConfig);
+        setMsg("✅ Direct D1 schema test passed (CREATE TABLE/INDEX + SELECT 1).");
+      }
     }catch(error){
       setErr(error instanceof Error ? error.message : "D1 schema test failed.");
     }finally{
