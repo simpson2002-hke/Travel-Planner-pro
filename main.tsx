@@ -3090,6 +3090,43 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }
   };
 
+  const runCorsSelfTest = async()=>{
+    const endpoint = workerEndpoint.trim();
+    if(!endpoint){
+      setErr("Please enter a Worker endpoint first.");
+      setMsg("");
+      return;
+    }
+
+    setTesting(true);
+    setErr("");
+    setMsg("");
+
+    try{
+      const optionsResp = await fetch(endpoint,{ method:"OPTIONS" });
+      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
+      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
+      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
+
+      const postResp = await fetch(endpoint,{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+      });
+      const postPayload = await postResp.json();
+
+      if(!postResp.ok || postPayload?.ok !== true){
+        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
+      }
+
+      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
+    }finally{
+      setTesting(false);
+    }
+  };
+
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
