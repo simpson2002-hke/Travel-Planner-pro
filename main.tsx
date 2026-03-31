@@ -268,13 +268,14 @@ async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[])
 }
 
 async function ensureCloudD1Schema(config:CloudD1Config){
-  await cloudD1Query(config,`
-    CREATE TABLE IF NOT EXISTS ai_storage (
-      storage_key TEXT PRIMARY KEY,
-      storage_value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
+  await cloudD1Query(
+    config,
+    "CREATE TABLE IF NOT EXISTS ai_storage (storage_key TEXT PRIMARY KEY, storage_value TEXT NOT NULL, updated_at TEXT NOT NULL);"
+  );
+  await cloudD1Query(
+    config,
+    "CREATE INDEX IF NOT EXISTS idx_ai_storage_updated_at ON ai_storage(updated_at);"
+  );
 }
 
 async function verifyCloudD1Config(config:CloudD1Config){
@@ -2986,6 +2987,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   const [apiToken,setApiToken] = useState(initial.apiToken);
   const [busy,setBusy] = useState(false);
   const [testing,setTesting] = useState(false);
+  const [d1Testing,setD1Testing] = useState(false);
   const [msg,setMsg] = useState("");
   const [err,setErr] = useState("");
 
@@ -3063,6 +3065,68 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }
   };
 
+  const runD1SchemaTest = async()=>{
+    const nextConfig: CloudD1Config = {
+      accountId: accountId.trim(),
+      databaseId: databaseId.trim(),
+      apiToken: apiToken.trim(),
+    };
+    if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
+      setErr("Enter Cloudflare Account ID, D1 Database ID, and API Token before running D1 schema test.");
+      setMsg("");
+      return;
+    }
+
+    setD1Testing(true);
+    setErr("");
+    setMsg("");
+    try{
+      await verifyCloudD1Config(nextConfig);
+      setMsg("✅ D1 schema test passed (CREATE TABLE/INDEX + SELECT 1). D1 fallback is healthy.");
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "D1 schema test failed.");
+    }finally{
+      setD1Testing(false);
+    }
+  };
+
+  const runCorsSelfTest = async()=>{
+    const endpoint = workerEndpoint.trim();
+    if(!endpoint){
+      setErr("Please enter a Worker endpoint first.");
+      setMsg("");
+      return;
+    }
+
+    setTesting(true);
+    setErr("");
+    setMsg("");
+
+    try{
+      const optionsResp = await fetch(endpoint,{ method:"OPTIONS" });
+      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
+      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
+      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
+
+      const postResp = await fetch(endpoint,{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+      });
+      const postPayload = await postResp.json();
+
+      if(!postResp.ok || postPayload?.ok !== true){
+        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
+      }
+
+      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
+    }finally{
+      setTesting(false);
+    }
+  };
+
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
@@ -3075,9 +3139,10 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     {msg&&<p className="text-emerald-400 text-sm">{msg}</p>}
     {err&&<p className="text-rose-400 text-sm break-words">{err}</p>}
     <div className="flex flex-wrap gap-2">
-      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing}>{busy?"Saving…":"Save & Verify"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={()=>{runCorsSelfTest().catch(()=>{});}} disabled={busy || testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing}>Load Saved</Btn>
+      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={()=>{runCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
 }
