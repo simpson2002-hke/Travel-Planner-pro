@@ -3024,7 +3024,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
     }finally{
-      setBusy(false);
+      setD1Testing(false);
     }
   };
 
