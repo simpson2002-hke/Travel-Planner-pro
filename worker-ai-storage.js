@@ -84,15 +84,14 @@ function createD1Adapter(db) {
 
   async function ensureSchema() {
     if (schemaReady) return;
-
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS ai_storage (
-        storage_key TEXT PRIMARY KEY,
-        storage_value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_ai_storage_updated_at ON ai_storage(updated_at);
-    `);
+    await db
+      .prepare(
+        'CREATE TABLE IF NOT EXISTS ai_storage (storage_key TEXT PRIMARY KEY, storage_value TEXT NOT NULL, updated_at TEXT NOT NULL);'
+      )
+      .run();
+    await db
+      .prepare('CREATE INDEX IF NOT EXISTS idx_ai_storage_updated_at ON ai_storage(updated_at);')
+      .run();
 
     schemaReady = true;
   }
