@@ -193,7 +193,6 @@ const DEPLOYED_CLOUDFLARE_D1_DATABASE_ID = (import.meta.env.VITE_CLOUDFLARE_D1_D
 const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN ?? DEFAULT_CLOUDFLARE_API_TOKEN).trim();
 const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
-const CLOUD_REQUEST_TIMEOUT_MS = 15000;
 
 type CloudD1Config = {
   accountId: string;
@@ -223,19 +222,12 @@ function setCloudD1Config(config:CloudD1Config){
 }
 
 function getCloudWorkerEndpoint(){
-  const endpoints = getCloudWorkerEndpoints();
-  return endpoints[0] ?? "";
-}
-
-function getCloudWorkerEndpoints(preferredEndpoint?:string){
-  const trimmedPreferred = preferredEndpoint?.trim() ?? "";
-  const candidates = [
-    trimmedPreferred,
-    (()=>{ try{return localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY)?.trim() ?? "";}catch{return "";} })(),
-    DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT,
-    DEFAULT_CLOUDFLARE_WORKER_ENDPOINT,
-  ].filter(Boolean);
-  return [...new Set(candidates)];
+  try{
+    const override = localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY)?.trim();
+    return override || DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+  }catch{
+    return DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+  }
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
@@ -247,28 +239,13 @@ function setCloudWorkerEndpoint(endpoint:string){
   localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
 }
 
-async function fetchWithTimeout(input:RequestInfo | URL,init:RequestInit={},timeoutMs=CLOUD_REQUEST_TIMEOUT_MS){
-  const controller = new AbortController();
-  const timer = window.setTimeout(()=>controller.abort(),timeoutMs);
-  try{
-    return await fetch(input,{...init,signal:controller.signal});
-  }catch(error){
-    if(error instanceof DOMException && error.name === "AbortError"){
-      throw new Error(`Request timed out after ${Math.round(timeoutMs/1000)}s.`);
-    }
-    throw error;
-  }finally{
-    window.clearTimeout(timer);
-  }
-}
-
 async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[]){
   if(!config.accountId || !config.databaseId || !config.apiToken){
     throw new Error("Cloudflare D1 config missing. Set account id, database id, and API token.");
   }
 
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`;
-  const res = await fetchWithTimeout(endpoint,{
+  const res = await fetch(endpoint,{
     method:"POST",
     headers:{
       "content-type":"application/json",
@@ -306,36 +283,27 @@ async function verifyCloudD1Config(config:CloudD1Config){
   await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
-async function verifyCloudWorkerEndpoint(preferredEndpoint?:string){
-  const endpoints = getCloudWorkerEndpoints(preferredEndpoint);
-  if(endpoints.length===0) throw new Error("Cloud worker endpoint missing.");
-  let lastError = "Unknown worker verification error.";
-  for(const endpoint of endpoints){
-    try{
-      const response = await fetchWithTimeout(endpoint,{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
-      });
-      const payload = await response.json();
-      if(!response.ok || payload?.ok !== true){
-        throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
-      }
-      return endpoint;
-    }catch(error){
-      lastError = error instanceof Error ? error.message : "Unknown worker verification error.";
-    }
+async function verifyCloudWorkerEndpoint(){
+  const endpoint = getCloudWorkerEndpoint();
+  if(!endpoint) throw new Error("Cloud worker endpoint missing.");
+  const response = await fetch(endpoint,{
+    method:"POST",
+    headers:{"content-type":"application/json"},
+    body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+  });
+  const payload = await response.json();
+  if(!response.ok || payload?.ok !== true){
+    throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
   }
-  throw new Error(lastError);
 }
 
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
-  const workerEndpoints = getCloudWorkerEndpoints();
+  const workerEndpoint = getCloudWorkerEndpoint();
   const workerErrors: string[] = [];
 
-  for(const workerEndpoint of workerEndpoints){
+  if(workerEndpoint){
     try{
-      const resp = await fetchWithTimeout(workerEndpoint,{
+      const resp = await fetch(workerEndpoint,{
         method:"POST",
         headers:{"content-type":"application/json"},
         body:JSON.stringify({ id:crypto.randomUUID(), action, key, value }),
@@ -346,7 +314,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
       }
       return payload?.data;
     }catch(error){
-      workerErrors.push(`${workerEndpoint}: ${error instanceof Error ? error.message : "Unknown worker fetch error."}`);
+      workerErrors.push(error instanceof Error ? error.message : "Unknown worker fetch error.");
     }
   }
 
@@ -3042,7 +3010,6 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     setBusy(true);
     setErr("");
     setMsg("");
-
     try{
       setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
@@ -3050,12 +3017,49 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
         await verifyCloudD1Config(nextConfig);
         setMsg("✅ Cloudflare D1 credentials saved and verified. Sync is active on this device.");
       }else{
-        await verifyCloudWorkerEndpoint(workerEndpoint);
+        await verifyCloudWorkerEndpoint();
         setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials can stay blank when worker mode is used.");
       }
       if(onSaved) await onSaved();
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
+    }finally{
+      setD1Testing(false);
+    }
+  };
+
+  const runWorkerCorsSelfTest = async()=>{
+    const endpoint = workerEndpoint.trim();
+    if(!endpoint){
+      setErr("Please enter a Worker endpoint first.");
+      setMsg("");
+      return;
+    }
+
+    setTesting(true);
+    setErr("");
+    setMsg("");
+
+    try{
+      const optionsResp = await fetch(endpoint,{ method:"OPTIONS" });
+      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
+      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
+      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
+
+      const postResp = await fetch(endpoint,{
+        method:"POST",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+      });
+      const postPayload = await postResp.json();
+
+      if(!postResp.ok || postPayload?.ok !== true){
+        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
+      }
+
+      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
+    }catch(error){
+      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
     }finally{
       setTesting(false);
     }
@@ -3080,92 +3084,6 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
         }
 
         const getResp = await fetch(endpoint,{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:testKey }),
-        });
-        const getPayload = await getResp.json();
-        const data = getPayload?.data;
-        if(!getResp.ok || getPayload?.ok !== true || data?.exists !== true){
-          throw new Error(getPayload?.error ?? `Worker D1 get test failed (${getResp.status})`);
-        }
-        setMsg("✅ D1 schema/storage test passed via Worker endpoint (set/get succeeded).");
-      }else{
-        const nextConfig: CloudD1Config = {
-          accountId: accountId.trim(),
-          databaseId: databaseId.trim(),
-          apiToken: apiToken.trim(),
-        };
-        if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
-          throw new Error("Enter Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 test.");
-        }
-        await verifyCloudD1Config(nextConfig);
-        setMsg("✅ Direct D1 schema test passed (CREATE TABLE/INDEX + SELECT 1).");
-      }
-    }catch(error){
-      setErr(error instanceof Error ? error.message : "D1 schema test failed.");
-    }finally{
-      setD1Testing(false);
-    }
-  };
-
-  const runWorkerCorsSelfTest = async()=>{
-      const endpoints = getCloudWorkerEndpoints(workerEndpoint);
-      if(endpoints.length===0){
-        setErr("Please enter a Worker endpoint first.");
-        setMsg("");
-        return;
-      }
-      const endpoint = endpoints[0];
-
-    setTesting(true);
-    setErr("");
-    setMsg("");
-
-    try{
-      const optionsResp = await fetchWithTimeout(endpoint,{ method:"OPTIONS" });
-      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
-      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
-      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
-
-      const postResp = await fetchWithTimeout(endpoint,{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
-      });
-      const postPayload = await postResp.json();
-
-      if(!postResp.ok || postPayload?.ok !== true){
-        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
-      }
-
-      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
-    }catch(error){
-      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
-    }finally{
-      setTesting(false);
-    }
-  };
-
-  const runD1SchemaTest = async()=>{
-    setD1Testing(true);
-    setErr("");
-    setMsg("");
-    try{
-      const endpoint = getCloudWorkerEndpoints(workerEndpoint)[0];
-      if(endpoint){
-        const testKey = `tp-d1-self-test-${Date.now()}`;
-        const setResp = await fetchWithTimeout(endpoint,{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({ id:crypto.randomUUID(), action:"set", key:testKey, value:{ ok:true, t:Date.now() } }),
-        });
-        const setPayload = await setResp.json();
-        if(!setResp.ok || setPayload?.ok !== true){
-          throw new Error(setPayload?.error ?? `Worker D1 set test failed (${setResp.status})`);
-        }
-
-        const getResp = await fetchWithTimeout(endpoint,{
           method:"POST",
           headers:{"content-type":"application/json"},
           body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:testKey }),
