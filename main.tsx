@@ -245,14 +245,23 @@ async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[])
   }
 
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`;
-  const res = await fetch(endpoint,{
-    method:"POST",
-    headers:{
-      "content-type":"application/json",
-      "authorization":`Bearer ${config.apiToken}`,
-    },
-    body:JSON.stringify({sql,params}),
-  });
+  let res: Response;
+  try{
+    res = await fetch(endpoint,{
+      method:"POST",
+      headers:{
+        "content-type":"application/json",
+        "authorization":`Bearer ${config.apiToken}`,
+      },
+      body:JSON.stringify({sql,params}),
+    });
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown fetch error.";
+    throw new Error(
+      `Cloudflare D1 API fetch failed for ${endpoint}. ${rawMessage} `+
+      "Direct D1 API calls from browsers are often blocked by CORS; prefer Worker endpoint mode for client-side sync."
+    );
+  }
   const data = await res.json();
   if(!res.ok || !data?.success){
     const err = data?.errors?.[0]?.message ?? data?.messages?.[0] ?? `Cloudflare D1 query failed (${res.status})`;
@@ -3025,12 +3034,14 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     try{
       setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
-      if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
-        await verifyCloudD1Config(nextConfig);
-        setMsg("✅ Cloudflare D1 credentials saved and verified. Sync is active on this device.");
-      }else{
+      if(workerEndpoint.trim()){
         await verifyCloudWorkerEndpoint();
-        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials can stay blank when worker mode is used.");
+        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials are optional and only used for direct fallback.");
+      }else if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
+        await verifyCloudD1Config(nextConfig);
+        setMsg("✅ Direct Cloudflare D1 API credentials verified. Use this mode only when Worker endpoint is not configured.");
+      }else{
+        throw new Error("Enter a Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 fallback.");
       }
       if(onSaved) await onSaved();
     }catch(error){
