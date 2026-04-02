@@ -676,7 +676,17 @@ function normTrip(i:unknown):Trip{
     transportMode:t.transportMode??"Transit", notes:t.notes??"",
     travelNotes:Array.isArray(t.travelNotes)?t.travelNotes:[],
     bannerColor:t.bannerColor??"#2563eb", bannerImage:t.bannerImage??"",
-    memberRoles, members, expenses:Array.isArray(t.expenses)?t.expenses:[],
+    memberRoles, members, expenses:Array.isArray(t.expenses)?t.expenses.map((expense,index)=>({
+      id: expense.id ?? uid(`ex-${index}`),
+      date: expense.date ?? "",
+      title: expense.title ?? "",
+      amount: typeof expense.amount === "number" ? expense.amount : Number(expense.amount ?? 0),
+      currency: expense.currency ?? "USD",
+      category: expense.category ?? "Other",
+      paidBy: expense.paidBy ?? "",
+      participants: Array.isArray(expense.participants) ? expense.participants : [],
+      notes: expense.notes ?? "",
+    })):[],
     itineraryChecklists,
     packingList:Array.isArray(t.packingList)?t.packingList:[],
     itinerary:rawItinerary.map((item,index)=>({
@@ -2047,7 +2057,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 
   const memberStats=members.map(member=>{
     const paid=trip.expenses.filter(exp=>exp.paidBy===member.id).reduce((sum,exp)=>sum+exp.amount,0);
-    const expenseTouches=trip.expenses.filter(exp=>exp.participants.includes(member.id) || exp.paidBy===member.id).length;
+    const expenseTouches=trip.expenses.filter(exp=>(exp.participants ?? []).includes(member.id) || exp.paidBy===member.id).length;
     const role=getTripRole(trip,member.id);
     return {member,paid,expenseTouches,role};
   });
@@ -2076,7 +2086,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
             </div>
           </div>
-          <Badge label={role} th={th} color={role==="owner"?"purple":role==="co-owner"?"green":"blue"}/>
+          <Badge label={role} th={th} color={role==="owner"?"amber":role==="co-owner"?"green":"blue"}/>
         </div>
 
         {isOwner&&member.id!==trip.ownerId&&<div>
