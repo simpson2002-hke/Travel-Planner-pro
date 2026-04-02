@@ -170,7 +170,10 @@ const fmtCur = (n:number,c="USD")=>new Intl.NumberFormat("en-US",{style:"currenc
 const upper = (v:string)=>v.trim().toUpperCase();
 const normalizeName = (v:string)=>upper(v);
 const normalizeAirport = (v:string)=>upper(v).slice(0,3);
-const getTripRole = (trip:Trip,userId:string):TripRole=>trip.memberRoles[userId] ?? (userId===trip.ownerId?"owner":"joiner");
+const getTripRole = (trip:Trip,userId:string):TripRole=>{
+  const roles = trip.memberRoles ?? {};
+  return roles[userId] ?? (userId===trip.ownerId?"owner":"joiner");
+};
 const canEditSettings = (role:TripRole)=>role==="owner"||role==="co-owner";
 const canEditItinerary = (role:TripRole)=>role==="owner"||role==="co-owner";
 const canEditExpenses = (role:TripRole)=>role==="owner"||role==="co-owner";
@@ -2039,7 +2042,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   const isOwner=trip.ownerId===user.id;
   const setRole=(memberId:string,role:TripRole)=>{
     if(!isOwner || memberId===trip.ownerId) return;
-    onUpdateTrip(trip.id,{memberRoles:{...trip.memberRoles,[memberId]:role}});
+    onUpdateTrip(trip.id,{memberRoles:{...(trip.memberRoles ?? {}),[memberId]:role}});
   };
 
   const memberStats=members.map(member=>{
@@ -2137,7 +2140,7 @@ function TripItinerary({trip,user,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip
   const nextOrder=(trip.itinerary.filter(it=>it.day===day).reduce((max,it)=>Math.max(max,it.order),0))+1;
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
-  const myChecklist=trip.itineraryChecklists[user.id] ?? {};
+  const myChecklist=(trip.itineraryChecklists ?? {})[user.id] ?? {};
 
   const shouldKeepManualTransit=(transit?:TransitLeg)=>{
     if(!transit?.duration&&!transit?.details) return false;
@@ -2283,7 +2286,7 @@ function TripItinerary({trip,user,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip
   const removeOptionalStop=(id:string)=>onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(stop=>stop.id!==id)});
   const toggleChecklistItem=(itemId:string)=>{
     const nextForUser={...myChecklist,[itemId]:!myChecklist[itemId]};
-    onTripUpdate(trip.id,{itineraryChecklists:{...trip.itineraryChecklists,[user.id]:nextForUser}});
+    onTripUpdate(trip.id,{itineraryChecklists:{...(trip.itineraryChecklists ?? {}),[user.id]:nextForUser}});
   };
 
   useEffect(()=>{
@@ -3438,8 +3441,8 @@ export function App(){
     setTrips(c=>c.map(t=>t.id===code?{
       ...t,
       members:[...t.members,user.id],
-      memberRoles:{...t.memberRoles,[user.id]:"joiner"},
-      itineraryChecklists:{...t.itineraryChecklists,[user.id]:{}},
+      memberRoles:{...(t.memberRoles ?? {}),[user.id]:"joiner"},
+      itineraryChecklists:{...(t.itineraryChecklists ?? {}),[user.id]:{}},
     }:t));
     return{ok:true,message:`Joined "${trip.title}"!`};
   };
@@ -3458,9 +3461,9 @@ export function App(){
   const deleteTraveler=(id:string)=>{
     setProfiles(c=>c.filter(p=>p.id!==id));
     setTrips(c=>c.map(t=>{
-      const nextRoles={...t.memberRoles};
+      const nextRoles={...(t.memberRoles ?? {})};
       delete nextRoles[id];
-      const nextChecklists={...t.itineraryChecklists};
+      const nextChecklists={...(t.itineraryChecklists ?? {})};
       delete nextChecklists[id];
       return {...t,ownerId:t.ownerId===id?"":t.ownerId,ownerName:t.ownerId===id?"Removed":t.ownerName,members:t.members.filter(m=>m!==id),
         memberRoles:nextRoles,itineraryChecklists:nextChecklists,
