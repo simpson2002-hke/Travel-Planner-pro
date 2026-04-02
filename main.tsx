@@ -230,6 +230,25 @@ function getCloudWorkerEndpoint(){
   }
 }
 
+function getCloudWorkerEndpointCandidates(){
+  const candidates: { endpoint: string; source: "override" | "deployed-default" }[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (endpoint: string | undefined, source: "override" | "deployed-default")=>{
+    const next = endpoint?.trim();
+    if(!next || seen.has(next)) return;
+    seen.add(next);
+    candidates.push({ endpoint: next, source });
+  };
+
+  try{
+    addCandidate(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY) ?? "", "override");
+  }catch{}
+
+  addCandidate(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT, "deployed-default");
+  return candidates;
+}
+
 function setCloudWorkerEndpoint(endpoint:string){
   const next = endpoint.trim();
   if(next){
@@ -315,10 +334,12 @@ async function verifyCloudWorkerEndpoint(endpointOverride?:string){
 }
 
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
-  const workerEndpoint = getCloudWorkerEndpoint();
+  const workerEndpoints = getCloudWorkerEndpointCandidates();
   const workerErrors: string[] = [];
+  const hasLocalOverride = workerEndpoints.some((item)=>item.source==="override");
 
-  if(workerEndpoint){
+  for(const candidate of workerEndpoints){
+    const workerEndpoint = candidate.endpoint;
     try{
       const resp = await fetch(workerEndpoint,{
         method:"POST",
@@ -328,6 +349,9 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
       const payload = await resp.json();
       if(!resp.ok || payload?.ok !== true){
         throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
+      }
+      if(hasLocalOverride && candidate.source==="deployed-default"){
+        setCloudWorkerEndpoint("");
       }
       return payload?.data;
     }catch(error){
@@ -340,7 +364,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const config = getCloudD1Config();
-  const canUseDirectD1Fallback = !workerEndpoint && config.accountId && config.databaseId && config.apiToken;
+  const canUseDirectD1Fallback = workerEndpoints.length===0 && config.accountId && config.databaseId && config.apiToken;
   if(canUseDirectD1Fallback){
     await ensureCloudD1Schema(config);
 
@@ -379,7 +403,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[0]}` : "";
-  if(workerEndpoint){
+  if(workerEndpoints.length>0){
     throw new Error(`Cloud sync failed in Worker mode.${workerMessage}`);
   }
   throw new Error(`Cloud sync failed: unable to reach worker or D1 configuration is incomplete.${workerMessage}`);
@@ -3144,6 +3168,13 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }
   };
 
+  const resetWorkerEndpointToDefault = ()=>{
+    setCloudWorkerEndpoint("");
+    setWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+    setMsg("Using deployed default worker endpoint on this device.");
+    setErr("");
+  };
+
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
@@ -3159,6 +3190,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use Deployed Endpoint</Btn>
       <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
