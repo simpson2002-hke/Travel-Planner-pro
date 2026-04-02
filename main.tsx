@@ -292,8 +292,8 @@ async function verifyCloudD1Config(config:CloudD1Config){
   await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
-async function verifyCloudWorkerEndpoint(){
-  const endpoint = getCloudWorkerEndpoint();
+async function verifyCloudWorkerEndpoint(endpointOverride?:string){
+  const endpoint = endpointOverride?.trim() || getCloudWorkerEndpoint();
   if(!endpoint) throw new Error("Cloud worker endpoint missing.");
   try{
     const response = await fetch(endpoint,{
@@ -404,6 +404,7 @@ function useSharedPersist<T>(key:string,init:T){
   const [s,set]=usePersist<T>(key,init);
   const stateRef = useRef(s);
   const hydratedRef = useRef(false);
+  const syncPrimedRef = useRef(false);
   const skipNextPushRef = useRef(false);
   const latestRemoteAtRef = useRef("");
   const deviceIdRef = useRef(getCloudDeviceId());
@@ -432,6 +433,7 @@ function useSharedPersist<T>(key:string,init:T){
     const remote = await cloudStorageRequest("get",key);
     if(!remote?.exists){
       await pushRemote();
+      syncPrimedRef.current = true;
       hydratedRef.current = true;
       setHydrated(true);
       setLastError("");
@@ -457,6 +459,7 @@ function useSharedPersist<T>(key:string,init:T){
     }
 
     hydratedRef.current = true;
+    syncPrimedRef.current = true;
     setHydrated(true);
     setLastError("");
   },[key,pushRemote,set]);
@@ -478,6 +481,7 @@ function useSharedPersist<T>(key:string,init:T){
   useEffect(()=>{
     if(!CLOUD_SHARED_KEYS.has(key)) return;
     if(!hydratedRef.current) return;
+    if(!syncPrimedRef.current) return;
     if(skipNextPushRef.current){
       skipNextPushRef.current = false;
       return;
@@ -3035,7 +3039,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
       if(workerEndpoint.trim()){
-        await verifyCloudWorkerEndpoint();
+        await verifyCloudWorkerEndpoint(workerEndpoint);
         setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials are optional and only used for direct fallback.");
       }else if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
         await verifyCloudD1Config(nextConfig);
