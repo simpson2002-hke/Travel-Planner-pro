@@ -193,6 +193,7 @@ const DEPLOYED_CLOUDFLARE_D1_DATABASE_ID = (import.meta.env.VITE_CLOUDFLARE_D1_D
 const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN ?? DEFAULT_CLOUDFLARE_API_TOKEN).trim();
 const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
+const CLOUD_EDITOR_PRIORITY_MS = 120000;
 
 type CloudD1Config = {
   accountId: string;
@@ -430,7 +431,10 @@ function parseCloudEnvelope<T>(value:unknown): CloudSyncEnvelope<T> | null{
 
 function useSharedPersist<T>(key:string,init:T){
   const [s,set]=usePersist<T>(key,init);
+  const initialSerializedRef = useRef(JSON.stringify(init));
   const stateRef = useRef(s);
+  const hasUnsyncedLocalRef = useRef(false);
+  const lastLocalEditAtRef = useRef(0);
   const hydratedRef = useRef(false);
   const syncPrimedRef = useRef(false);
   const skipNextPushRef = useRef(false);
@@ -452,6 +456,7 @@ function useSharedPersist<T>(key:string,init:T){
 
     await cloudStorageRequest("set",key,payload);
     latestRemoteAtRef.current = payload.updatedAt;
+    hasUnsyncedLocalRef.current = false;
     setLastError("");
   },[key]);
 
@@ -471,11 +476,21 @@ function useSharedPersist<T>(key:string,init:T){
     const envelope = parseCloudEnvelope<T>(remote.value);
     const remoteValue = envelope ? envelope.value : remote.value as T;
     const remoteUpdatedAt = envelope?.updatedAt ?? "";
+    const remoteDeviceId = envelope?.deviceId ?? "";
     const localSerialized = JSON.stringify(stateRef.current);
     const remoteSerialized = JSON.stringify(remoteValue);
+    const localLooksUnchanged = localSerialized === initialSerializedRef.current;
+    const isOtherDeviceUpdate = Boolean(remoteDeviceId) && remoteDeviceId !== deviceIdRef.current;
+    const localEditorHasPriority = isOtherDeviceUpdate && Date.now() - lastLocalEditAtRef.current < CLOUD_EDITOR_PRIORITY_MS;
     const shouldAdoptRemote =
-      !hydratedRef.current ||
-      (remoteUpdatedAt && remoteUpdatedAt > latestRemoteAtRef.current && remoteSerialized !== localSerialized);
+      (!hydratedRef.current && localLooksUnchanged) ||
+      (
+        remoteUpdatedAt &&
+        remoteUpdatedAt > latestRemoteAtRef.current &&
+        remoteSerialized !== localSerialized &&
+        !hasUnsyncedLocalRef.current &&
+        !localEditorHasPriority
+      );
 
     if(remoteUpdatedAt && remoteUpdatedAt > latestRemoteAtRef.current){
       latestRemoteAtRef.current = remoteUpdatedAt;
@@ -514,6 +529,8 @@ function useSharedPersist<T>(key:string,init:T){
       skipNextPushRef.current = false;
       return;
     }
+    lastLocalEditAtRef.current = Date.now();
+    hasUnsyncedLocalRef.current = true;
     pushRemote().catch((error)=>{
       setLastError(error instanceof Error ? error.message : "Cloud sync failed.");
     });
@@ -555,8 +572,15 @@ function useSharedPersist<T>(key:string,init:T){
   },[key,pullRemote,set]);
 
   const syncNow = useCallback(async()=>{
+    if(hasUnsyncedLocalRef.current){
+      try{
+        await pushRemote();
+      }catch(error){
+        setLastError(error instanceof Error ? error.message : "Cloud sync failed.");
+      }
+    }
     await pullRemote();
-  },[pullRemote]);
+  },[pullRemote,pushRemote]);
 
   return [s,set,{hydrated,lastError,syncNow}] as const;
 }
