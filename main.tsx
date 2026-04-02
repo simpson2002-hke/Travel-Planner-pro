@@ -245,14 +245,23 @@ async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[])
   }
 
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`;
-  const res = await fetch(endpoint,{
-    method:"POST",
-    headers:{
-      "content-type":"application/json",
-      "authorization":`Bearer ${config.apiToken}`,
-    },
-    body:JSON.stringify({sql,params}),
-  });
+  let res: Response;
+  try{
+    res = await fetch(endpoint,{
+      method:"POST",
+      headers:{
+        "content-type":"application/json",
+        "authorization":`Bearer ${config.apiToken}`,
+      },
+      body:JSON.stringify({sql,params}),
+    });
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown fetch error.";
+    throw new Error(
+      `Cloudflare D1 API fetch failed for ${endpoint}. ${rawMessage} `+
+      "Direct D1 API calls from browsers are often blocked by CORS; prefer Worker endpoint mode for client-side sync."
+    );
+  }
   const data = await res.json();
   if(!res.ok || !data?.success){
     const err = data?.errors?.[0]?.message ?? data?.messages?.[0] ?? `Cloudflare D1 query failed (${res.status})`;
@@ -283,17 +292,25 @@ async function verifyCloudD1Config(config:CloudD1Config){
   await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
-async function verifyCloudWorkerEndpoint(){
-  const endpoint = getCloudWorkerEndpoint();
+async function verifyCloudWorkerEndpoint(endpointOverride?:string){
+  const endpoint = endpointOverride?.trim() || getCloudWorkerEndpoint();
   if(!endpoint) throw new Error("Cloud worker endpoint missing.");
-  const response = await fetch(endpoint,{
-    method:"POST",
-    headers:{"content-type":"application/json"},
-    body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
-  });
-  const payload = await response.json();
-  if(!response.ok || payload?.ok !== true){
-    throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
+  try{
+    const response = await fetch(endpoint,{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+    });
+    const payload = await response.json();
+    if(!response.ok || payload?.ok !== true){
+      throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
+    }
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown worker request error.";
+    throw new Error(
+      `Worker verification failed for ${endpoint}. ${rawMessage} `+
+      "If this says 'Failed to fetch', check CORS allow-origin/headers, HTTPS certificate, and that the Worker route is publicly reachable."
+    );
   }
 }
 
@@ -314,7 +331,11 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
       }
       return payload?.data;
     }catch(error){
-      workerErrors.push(error instanceof Error ? error.message : "Unknown worker fetch error.");
+      const rawMessage = error instanceof Error ? error.message : "Unknown worker fetch error.";
+      workerErrors.push(
+        `Worker fetch failed for ${workerEndpoint}: ${rawMessage}. `+
+        "If this says 'Failed to fetch', verify Worker CORS headers and that the endpoint is reachable from the browser."
+      );
     }
   }
 
@@ -383,6 +404,7 @@ function useSharedPersist<T>(key:string,init:T){
   const [s,set]=usePersist<T>(key,init);
   const stateRef = useRef(s);
   const hydratedRef = useRef(false);
+  const syncPrimedRef = useRef(false);
   const skipNextPushRef = useRef(false);
   const latestRemoteAtRef = useRef("");
   const deviceIdRef = useRef(getCloudDeviceId());
@@ -411,6 +433,7 @@ function useSharedPersist<T>(key:string,init:T){
     const remote = await cloudStorageRequest("get",key);
     if(!remote?.exists){
       await pushRemote();
+      syncPrimedRef.current = true;
       hydratedRef.current = true;
       setHydrated(true);
       setLastError("");
@@ -436,6 +459,7 @@ function useSharedPersist<T>(key:string,init:T){
     }
 
     hydratedRef.current = true;
+    syncPrimedRef.current = true;
     setHydrated(true);
     setLastError("");
   },[key,pushRemote,set]);
@@ -457,6 +481,7 @@ function useSharedPersist<T>(key:string,init:T){
   useEffect(()=>{
     if(!CLOUD_SHARED_KEYS.has(key)) return;
     if(!hydratedRef.current) return;
+    if(!syncPrimedRef.current) return;
     if(skipNextPushRef.current){
       skipNextPushRef.current = false;
       return;
@@ -3013,18 +3038,20 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     try{
       setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
-      if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
+      if(workerEndpoint.trim()){
+        await verifyCloudWorkerEndpoint(workerEndpoint);
+        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials are optional and only used for direct fallback.");
+      }else if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
         await verifyCloudD1Config(nextConfig);
-        setMsg("✅ Cloudflare D1 credentials saved and verified. Sync is active on this device.");
+        setMsg("✅ Direct Cloudflare D1 API credentials verified. Use this mode only when Worker endpoint is not configured.");
       }else{
-        await verifyCloudWorkerEndpoint();
-        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials can stay blank when worker mode is used.");
+        throw new Error("Enter a Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 fallback.");
       }
       if(onSaved) await onSaved();
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
     }finally{
-      setD1Testing(false);
+      setBusy(false);
     }
   };
 
@@ -3173,6 +3200,7 @@ export function App(){
   const sharedSyncReady = profilesMeta.hydrated && tripsMeta.hydrated && adminPwMeta.hydrated && siteCfgMeta.hydrated;
   const sharedSyncErrors = [profilesMeta.lastError,tripsMeta.lastError,adminPwMeta.lastError,siteCfgMeta.lastError].filter(Boolean);
   const syncStatusMessage = sharedSyncErrors[0] ?? "";
+  const sharedSyncHealthy = sharedSyncReady && sharedSyncErrors.length===0;
   const refreshSharedSync = useCallback(async()=>{
     setManualSyncing(true);
     try{
@@ -3186,12 +3214,14 @@ export function App(){
 
   const handleSignIn=(ident:string,pw:string)=>{
     if(!sharedSyncReady)return{ok:false,message:"Shared account data is still syncing. Please wait a moment and try again."};
+    if(!sharedSyncHealthy)return{ok:false,message:`Cloud sync has an error on this device: ${syncStatusMessage}`};
     const found=profiles.find(p=>(p.email.toLowerCase()===ident.trim().toLowerCase()||p.accountName.toLowerCase()===ident.trim().toLowerCase())&&p.password===pw);
     if(!found)return{ok:false,message:t("invalidCredentials")};
     setUserId(found.id);return{ok:true,message:"OK"};
   };
 
   const handleSignUp=(d:Omit<Profile,"id">)=>{
+    if(!sharedSyncHealthy)return{ok:false,message:`Cannot create a shared account until cloud sync is healthy on this device: ${syncStatusMessage}`};
     const accountName=upper(d.accountName);
     const phone=d.phone.trim();
     if(profiles.some(p=>p.email.toLowerCase()===d.email.trim().toLowerCase()))return{ok:false,message:t("emailExists")};
