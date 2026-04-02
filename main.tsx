@@ -61,6 +61,8 @@ type OptionalStop = {
   url: string; notes: string;
 };
 
+type TripRole = "owner" | "co-owner" | "joiner";
+
 type Trip = {
   id: string; ownerId: string; ownerName: string; title: string; location: string;
   startDate: string; endDate: string; duration: number;
@@ -71,7 +73,9 @@ type Trip = {
   transportMode: string; notes: string;
   travelNotes: TravelNote[];
   bannerColor: string; bannerImage: string;
+  memberRoles: Record<string, TripRole>;
   members: string[]; expenses: Expense[];
+  itineraryChecklists: Record<string, Record<string, boolean>>;
   packingList: PackingItem[]; itinerary: ItineraryItem[]; optionalStops: OptionalStop[];
   createdAt: string;
   customLocation?: {name:string;lat:number;lon:number};
@@ -166,6 +170,13 @@ const fmtCur = (n:number,c="USD")=>new Intl.NumberFormat("en-US",{style:"currenc
 const upper = (v:string)=>v.trim().toUpperCase();
 const normalizeName = (v:string)=>upper(v);
 const normalizeAirport = (v:string)=>upper(v).slice(0,3);
+const getTripRole = (trip:Trip,userId:string):TripRole=>{
+  const roles = trip.memberRoles ?? {};
+  return roles[userId] ?? (userId===trip.ownerId?"owner":"joiner");
+};
+const canEditSettings = (role:TripRole)=>role==="owner"||role==="co-owner";
+const canEditItinerary = (role:TripRole)=>role==="owner"||role==="co-owner";
+const canEditExpenses = (role:TripRole)=>role==="owner"||role==="co-owner";
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -631,6 +642,22 @@ function normTrip(i:unknown):Trip{
           checkIn: t.checkIn ?? "", checkOut: t.checkOut ?? "", confirmationCode: t.confirmationCode ?? "", contact: "", notes: "",
         }]
       : [];
+  const members = Array.isArray(t.members) ? t.members : [];
+  const rawRoles = (t.memberRoles && typeof t.memberRoles==="object" ? t.memberRoles : {}) as Record<string, TripRole>;
+  const memberRoles = members.reduce<Record<string, TripRole>>((acc,memberId)=>{
+    const existing = rawRoles[memberId];
+    acc[memberId] = existing==="owner"||existing==="co-owner"||existing==="joiner" ? existing : (memberId===t.ownerId ? "owner" : "joiner");
+    return acc;
+  },{});
+  if(t.ownerId && memberRoles[t.ownerId] !== "owner"){
+    memberRoles[t.ownerId] = "owner";
+  }
+  const rawChecklists = (t.itineraryChecklists && typeof t.itineraryChecklists==="object" ? t.itineraryChecklists : {}) as Record<string, Record<string, boolean>>;
+  const itineraryChecklists = members.reduce<Record<string, Record<string, boolean>>>((acc,memberId)=>{
+    const checklist = rawChecklists[memberId];
+    acc[memberId] = checklist && typeof checklist==="object" ? checklist : {};
+    return acc;
+  },{});
   return { id:t.id??tripCode(), ownerId:t.ownerId??"", ownerName:t.ownerName??"",
     title:t.title??"Untitled", location:t.location??"", startDate:start, endDate:end,
     duration:t.duration??calcDuration(start,end),
@@ -649,7 +676,18 @@ function normTrip(i:unknown):Trip{
     transportMode:t.transportMode??"Transit", notes:t.notes??"",
     travelNotes:Array.isArray(t.travelNotes)?t.travelNotes:[],
     bannerColor:t.bannerColor??"#2563eb", bannerImage:t.bannerImage??"",
-    members:Array.isArray(t.members)?t.members:[], expenses:Array.isArray(t.expenses)?t.expenses:[],
+    memberRoles, members, expenses:Array.isArray(t.expenses)?t.expenses.map((expense,index)=>({
+      id: expense.id ?? uid(`ex-${index}`),
+      date: expense.date ?? "",
+      title: expense.title ?? "",
+      amount: typeof expense.amount === "number" ? expense.amount : Number(expense.amount ?? 0),
+      currency: expense.currency ?? "USD",
+      category: expense.category ?? "Other",
+      paidBy: expense.paidBy ?? "",
+      participants: Array.isArray(expense.participants) ? expense.participants : [],
+      notes: expense.notes ?? "",
+    })):[],
+    itineraryChecklists,
     packingList:Array.isArray(t.packingList)?t.packingList:[],
     itinerary:rawItinerary.map((item,index)=>({
       ...(item as ItineraryItem),
@@ -1688,7 +1726,11 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onAddExp,on
   onRemoveExp:(tid:string,eid:string)=>void;
 }){
   const [tab,setTab]=useState<TripTab>("overview");
-  const isOwner=trip.ownerId===user.id;
+  const role=getTripRole(trip,user.id);
+  const isOwner=role==="owner";
+  const canManageSettings=canEditSettings(role);
+  const canManageItinerary=canEditItinerary(role);
+  const canManageExpenses=canEditExpenses(role);
   const status=getTripStatus(trip);
 
   const tripTabs:{id:TripTab;label:string;icon:string}[]=[
@@ -1727,11 +1769,11 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onAddExp,on
     <Tabs tabs={tripTabs} active={tab} onChange={setTab} th={th}/>
 
     {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate}/>} 
-    {tab==="travelers"&&<TripTravelers trip={trip} profiles={profiles} th={th} t={t}/>} 
-    {tab==="itinerary"&&<TripItinerary trip={trip} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
-    {tab==="expenses"&&<TripExpenses trip={trip} user={user} profiles={profiles} th={th} t={t} onAdd={onAddExp} onRemove={onRemoveExp}/>}
+    {tab==="travelers"&&<TripTravelers trip={trip} user={user} profiles={profiles} th={th} t={t} onUpdateTrip={onUpdate}/>} 
+    {tab==="itinerary"&&<TripItinerary trip={trip} user={user} canEdit={canManageItinerary} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
+    {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack}/>}
-    {tab==="settings"&&<TripSettings trip={trip} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate}/>}
+    {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate}/>}
   </div>;
 }
 
@@ -2005,13 +2047,19 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
   </div>;
 }
 
-function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string}){
+function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Profile;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onUpdateTrip:(id:string,d:Partial<Trip>)=>void}){
   const members=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
+  const isOwner=trip.ownerId===user.id;
+  const setRole=(memberId:string,role:TripRole)=>{
+    if(!isOwner || memberId===trip.ownerId) return;
+    onUpdateTrip(trip.id,{memberRoles:{...(trip.memberRoles ?? {}),[memberId]:role}});
+  };
 
   const memberStats=members.map(member=>{
     const paid=trip.expenses.filter(exp=>exp.paidBy===member.id).reduce((sum,exp)=>sum+exp.amount,0);
-    const expenseTouches=trip.expenses.filter(exp=>exp.participants.includes(member.id) || exp.paidBy===member.id).length;
-    return {member,paid,expenseTouches};
+    const expenseTouches=trip.expenses.filter(exp=>(exp.participants ?? []).includes(member.id) || exp.paidBy===member.id).length;
+    const role=getTripRole(trip,member.id);
+    return {member,paid,expenseTouches,role};
   });
 
   return <div className="space-y-5">
@@ -2029,7 +2077,7 @@ function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:The
     </Card>
 
     <div className="grid xl:grid-cols-2 gap-5">
-      {memberStats.map(({member,paid,expenseTouches})=><Card key={member.id} th={th} className="p-7 space-y-5">
+      {memberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
             <Avatar name={dn(member)} th={th}/>
@@ -2038,8 +2086,21 @@ function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:The
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
             </div>
           </div>
-          <Badge label={member.id===trip.ownerId?t("owner"):t("travelers")} th={th} color={member.id===trip.ownerId?"purple":"blue"}/>
+          <Badge label={role} th={th} color={role==="owner"?"amber":role==="co-owner"?"green":"blue"}/>
         </div>
+
+        {isOwner&&member.id!==trip.ownerId&&<div>
+          <p className={cx("text-xs mb-2",th==="dark"?"text-slate-400":"text-slate-500")}>Role</p>
+          <div className="flex gap-2 flex-wrap">
+            {(["co-owner","joiner"] as TripRole[]).map(roleOption=><button key={roleOption} type="button" onClick={()=>setRole(member.id,roleOption)}
+              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
+                role===roleOption
+                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
+                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
+              {roleOption}
+            </button>)}
+          </div>
+        </div>}
 
         <div className="grid sm:grid-cols-2 gap-2">
           <div className={cx("rounded-2xl p-3",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
@@ -2054,7 +2115,7 @@ function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:The
 
         <div className="grid gap-2">
           <InfoRow label={t("tripId")} value={trip.id} th={th}/>
-          <InfoRow label={t("status")} value={member.id===trip.ownerId?t("owner"):t("travelers")} th={th}/>
+          <InfoRow label={t("status")} value={role} th={th}/>
           <InfoRow label={t("email")} value={member.email} th={th}/>
           <InfoRow label={t("phone")} value={member.phone} th={th}/>
           {member.nationality&&<InfoRow label={t("nationality")} value={member.nationality} th={th}/>} 
@@ -2072,7 +2133,7 @@ function TripTravelers({trip,profiles,th,t}:{trip:Trip;profiles:Profile[];th:The
   </div>;
 }
 
-function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
+function TripItinerary({trip,user,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;canEdit:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
   const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Walk",details:"",photo:"",mapUrl:""};
   const emptyOptionalForm={day:1,type:"site" as OptionalStop["type"],title:"",location:"",url:"",notes:""};
   const [activePane,setActivePane]=useState<"schedule"|"saved">("schedule");
@@ -2089,6 +2150,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
   const nextOrder=(trip.itinerary.filter(it=>it.day===day).reduce((max,it)=>Math.max(max,it.order),0))+1;
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
+  const myChecklist=(trip.itineraryChecklists ?? {})[user.id] ?? {};
 
   const shouldKeepManualTransit=(transit?:TransitLeg)=>{
     if(!transit?.duration&&!transit?.details) return false;
@@ -2136,6 +2198,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
 
   const saveActivity=async(e:React.FormEvent)=>{
     e.preventDefault();
+    if(!canEdit) return;
     if(!form.title.trim())return;
     const payload={
       startTime:form.startTime,
@@ -2157,6 +2220,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
   };
 
   const move=async(idx:number,dir:1|-1)=>{
+    if(!canEdit) return;
     const swapWith=idx+dir;
     if(swapWith<0||swapWith>=dayItems.length)return;
     const reordered=[...dayItems];
@@ -2167,6 +2231,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
   };
 
   const remove=async(id:string)=>{
+    if(!canEdit) return;
     const remaining=trip.itinerary.filter(it=>it.id!==id);
     const remainingDay=remaining.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
     const orderMap=new Map(remainingDay.map((item,index)=>[item.id,index+1]));
@@ -2195,12 +2260,14 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
   };
 
   const saveTransport=(itemId:string)=>{
+    if(!canEdit) return;
     onUpdate(trip.id,trip.itinerary.map(it=>it.id===itemId?{...it,transitToNext:{duration:transportForm.duration,details:transportForm.details}}:it));
     setTransportEditId(null);
     setTransportForm({duration:"",details:""});
   };
 
   const clearTransport=(itemId:string)=>{
+    if(!canEdit) return;
     onUpdate(trip.id,trip.itinerary.map(it=>it.id===itemId?{...it,transitToNext:{duration:"",details:""}}:it));
     setTransportEditId(null);
     setTransportForm({duration:"",details:""});
@@ -2208,6 +2275,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
 
   const saveOptionalStop=(e:React.FormEvent)=>{
     e.preventDefault();
+    if(!canEdit) return;
     if(!optionalForm.title.trim()) return;
     const normalized={...optionalForm, day:Math.min(Math.max(optionalForm.day,1),trip.duration)};
     const next = optionalEditId
@@ -2226,6 +2294,10 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
   };
 
   const removeOptionalStop=(id:string)=>onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(stop=>stop.id!==id)});
+  const toggleChecklistItem=(itemId:string)=>{
+    const nextForUser={...myChecklist,[itemId]:!myChecklist[itemId]};
+    onTripUpdate(trip.id,{itineraryChecklists:{...(trip.itineraryChecklists ?? {}),[user.id]:nextForUser}});
+  };
 
   useEffect(()=>{
     setOptionalForm(current=>current.day===day?current:{...current,day});
@@ -2252,11 +2324,15 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
         {activePane==="schedule" ? (dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative">
           {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"")}>
             <div className="flex items-start gap-4">
-              <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
+              <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1">
                 <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.transport} th={th}/></div>
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
+                <label className="mt-3 inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <input type="checkbox" checked={Boolean(myChecklist[it.id])} onChange={()=>toggleChecklistItem(it.id)}/>
+                  My checklist done
+                </label>
 
                 {(it.transitToNext?.duration||it.transitToNext?.details)&&<div className={cx("mt-3 rounded-xl border border-dashed px-3 py-2",th==="dark"?"border-white/20":"border-slate-300")}>
                   <p className="text-xs font-semibold uppercase">{t("transitTime")}</p>
@@ -2265,8 +2341,8 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
                 </div>}
 
                 <div className="mt-2 flex gap-2">
-                  <Btn th={th} v="sec" sz="sm" onClick={()=>startTransportEdit(it)}>{t("editTransportDetail")}</Btn>
-                  {(it.transitToNext?.duration||it.transitToNext?.details)&&<Btn th={th} v="ghost" sz="sm" onClick={()=>clearTransport(it.id)}>{t("clearTransportDetail")}</Btn>}
+                  <Btn th={th} v="sec" sz="sm" onClick={()=>startTransportEdit(it)} disabled={!canEdit}>{t("editTransportDetail")}</Btn>
+                  {(it.transitToNext?.duration||it.transitToNext?.details)&&<Btn th={th} v="ghost" sz="sm" onClick={()=>clearTransport(it.id)} disabled={!canEdit}>{t("clearTransportDetail")}</Btn>}
                 </div>
 
                 {transportEditId===it.id&&<div className="mt-3 space-y-2">
@@ -2278,7 +2354,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
                 {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="mt-3 h-40 w-full rounded-2xl border border-white/10"/>}
                 {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-32 w-full rounded-2xl border border-white/10 object-cover"/>}
               </div>
-              <div className="flex gap-2"><button onClick={()=>edit(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200")}>✏️</button><button onClick={()=>remove(it.id)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100")}>✕</button></div>
+              <div className="flex gap-2"><button onClick={()=>edit(it)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>) : (<div className="mt-6 space-y-4">
@@ -2294,8 +2370,8 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
                 {stop.url&&<a href={stop.url} target="_blank" rel="noreferrer" className={cx("mt-3 inline-flex text-sm font-semibold underline",th==="dark"?"text-cyan-300":"text-blue-700")}>{stop.url}</a>}
               </div>
               <div className="flex gap-2">
-                <Btn th={th} v="sec" sz="sm" onClick={()=>editOptionalStop(stop)}>{t("edit")}</Btn>
-                <Btn th={th} v="danger" sz="sm" onClick={()=>removeOptionalStop(stop.id)}>{t("remove")}</Btn>
+                <Btn th={th} v="sec" sz="sm" onClick={()=>editOptionalStop(stop)} disabled={!canEdit}>{t("edit")}</Btn>
+                <Btn th={th} v="danger" sz="sm" onClick={()=>removeOptionalStop(stop.id)} disabled={!canEdit}>{t("remove")}</Btn>
               </div>
             </div>
           </Card>)}
@@ -2304,6 +2380,7 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
     </div>
 
     <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
+      {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>You can manage your own checklist, but only owner/co-owner can edit itinerary details.</p>}
       <div className="mb-4">
         <h3 className="text-xl font-bold">{activePane==="schedule" ? (editId?t("edit"):t("addActivity")) : (optionalEditId?t("editOptionalPlace"):t("addOptionalPlace"))}</h3>
         <p className={cx("mt-2 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{activePane==="schedule" ? t("noItineraryDesc") : t("optionalPlacesDesc")}</p>
@@ -2324,8 +2401,8 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
           <Input th={th} label={t("photoUrl")} value={form.photo} onChange={e=>setForm(f=>({...f,photo:e.target.value}))}/>
           {form.photo&&<img src={form.photo} alt="preview" className="h-24 w-full rounded-2xl border border-white/10 object-cover"/>}
         </div>
-        <Btn th={th} type="submit">{editId?t("save"):t("add")}</Btn>
-        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}}>{t("cancel")}</Btn>}
+        <Btn th={th} type="submit" disabled={!canEdit}>{editId?t("save"):t("add")}</Btn>
+        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!canEdit}>{t("cancel")}</Btn>}
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
@@ -2337,14 +2414,14 @@ function TripItinerary({trip,th,t,onUpdate,onTripUpdate}:{trip:Trip;th:ThemeMode
         <Input th={th} label={t("optionalLocation")} value={optionalForm.location} onChange={e=>setOptionalForm(f=>({...f,location:e.target.value}))}/>
         <Input th={th} label={t("reservationLink")} value={optionalForm.url} onChange={e=>setOptionalForm(f=>({...f,url:e.target.value}))}/>
         <Textarea th={th} label={t("optionalPlaceNotes")} value={optionalForm.notes} onChange={e=>setOptionalForm(f=>({...f,notes:e.target.value}))}/>
-        <Btn th={th} type="submit">{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
-        {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}}>{t("cancel")}</Btn>}
+        <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
+        {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
       </form>}
     </Card>
   </div>;
 }
 
-function TripExpenses({trip,user,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:Profile;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
+function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:Profile;canEdit:boolean;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
   const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:""});
   const [showForm,setShowForm]=useState(false);
 
@@ -2358,6 +2435,7 @@ function TripExpenses({trip,user,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:P
 
   const add=(e:React.FormEvent)=>{
     e.preventDefault();
+    if(!canEdit) return;
     if(!form.title.trim()||form.amount<=0)return;
     onAdd(trip.id,{...form,participants:form.participants.length?form.participants:members.map(m=>m.id)});
     setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:""});
@@ -2371,8 +2449,9 @@ function TripExpenses({trip,user,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:P
       <Card th={th} className="p-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold">{t("expenses")}</h2>
-          <Btn th={th} onClick={()=>setShowForm(true)}>+ {t("addExpense")}</Btn>
+          <Btn th={th} onClick={()=>setShowForm(true)} disabled={!canEdit}>+ {t("addExpense")}</Btn>
         </div>
+        {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Joiners can view expenses but cannot add or remove entries.</p>}
 
         {/* Balance Summary */}
         {myBal&&<Card th={th} className="p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
@@ -2419,7 +2498,7 @@ function TripExpenses({trip,user,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:P
                   </p>
                   {exp.notes&&<p className={cx("text-sm mt-1",th==="dark"?"text-slate-300":"text-slate-600")}>{exp.notes}</p>}
                 </div>
-                <button onClick={()=>onRemove(trip.id,exp.id)} className="opacity-60 hover:opacity-100 text-rose-400 text-xl">✕</button>
+                <button onClick={()=>onRemove(trip.id,exp.id)} disabled={!canEdit} className="opacity-60 hover:opacity-100 text-rose-400 text-xl disabled:opacity-30">✕</button>
               </div>
             </Card>;
           })}
@@ -2632,7 +2711,7 @@ function TripLuggage({trip,siteCfg,th,t,onAdd,onToggle,onRemove}:{trip:Trip;site
   </div>;
 }
 
-function TripSettings({trip,isOwner,siteCfg,th,t,onUpdate}:{trip:Trip;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void}){
+function TripSettings({trip,canEdit,siteCfg,th,t,onUpdate}:{trip:Trip;canEdit:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void}){
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
   const [bannerMessage,setBannerMessage]=useState("");
@@ -2760,10 +2839,10 @@ function TripSettings({trip,isOwner,siteCfg,th,t,onUpdate}:{trip:Trip;isOwner:bo
     }finally{setHotelSearchingId(null);}
   };
 
-  if(!isOwner){
+  if(!canEdit){
     return <Card th={th} className="p-8 text-center">
       <p className={cx("text-lg",th==="dark"?"text-slate-400":"text-slate-500")}>
-        ⚙️ {t("settings")} — {t("owner")} only
+        ⚙️ {t("settings")} — owner / co-owner only
       </p>
     </Card>;
   }
@@ -3008,6 +3087,7 @@ function AdminTravelers({profiles,trips,th,t,onDelete}:{profiles:Profile[];trips
             <div>
               <p className="font-semibold text-lg">{dn(p)}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{p.accountName} · {p.email} · {p.phone}</p>
+              <p className={cx("text-sm",th==="dark"?"text-amber-300":"text-amber-700")}>Password: {p.password || "—"}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-500":"text-slate-400")}>{joined} {t("adminTrips")}</p>
             </div>
           </div>
@@ -3356,7 +3436,8 @@ export function App(){
       flightNumber:"",airline:"",departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",
       hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",transportMode:"Transit",notes:"",travelNotes:[],
       flightLegs:[],hotels:[],
-      bannerColor:"#2563eb",bannerImage:"",members:[user.id],expenses:[],packingList:packing,
+      bannerColor:"#2563eb",bannerImage:"",memberRoles:{[user.id]:"owner"},members:[user.id],expenses:[],
+      itineraryChecklists:{[user.id]:{}},packingList:packing,
       itinerary:[],optionalStops:[],createdAt:new Date().toISOString(),
     };
     setTrips(c=>[trip,...c]);
@@ -3367,7 +3448,12 @@ export function App(){
     const trip=trips.find(t=>t.id===code);
     if(!trip)return{ok:false,message:"Trip not found."};
     if(trip.members.includes(user.id))return{ok:false,message:"Already joined."};
-    setTrips(c=>c.map(t=>t.id===code?{...t,members:[...t.members,user.id]}:t));
+    setTrips(c=>c.map(t=>t.id===code?{
+      ...t,
+      members:[...t.members,user.id],
+      memberRoles:{...(t.memberRoles ?? {}),[user.id]:"joiner"},
+      itineraryChecklists:{...(t.itineraryChecklists ?? {}),[user.id]:{}},
+    }:t));
     return{ok:true,message:`Joined "${trip.title}"!`};
   };
 
@@ -3384,8 +3470,15 @@ export function App(){
   const deleteTrip=(id:string)=>setTrips(c=>c.filter(t=>t.id!==id));
   const deleteTraveler=(id:string)=>{
     setProfiles(c=>c.filter(p=>p.id!==id));
-    setTrips(c=>c.map(t=>({...t,ownerId:t.ownerId===id?"":t.ownerId,ownerName:t.ownerId===id?"Removed":t.ownerName,members:t.members.filter(m=>m!==id),
-      expenses:t.expenses.filter(e=>e.paidBy!==id).map(e=>({...e,participants:e.participants.filter(p=>p!==id)}))})));
+    setTrips(c=>c.map(t=>{
+      const nextRoles={...(t.memberRoles ?? {})};
+      delete nextRoles[id];
+      const nextChecklists={...(t.itineraryChecklists ?? {})};
+      delete nextChecklists[id];
+      return {...t,ownerId:t.ownerId===id?"":t.ownerId,ownerName:t.ownerId===id?"Removed":t.ownerName,members:t.members.filter(m=>m!==id),
+        memberRoles:nextRoles,itineraryChecklists:nextChecklists,
+        expenses:t.expenses.filter(e=>e.paidBy!==id).map(e=>({...e,participants:e.participants.filter(p=>p!==id)}))};
+    }));
     if(userId===id)setUserId("");
   };
 
