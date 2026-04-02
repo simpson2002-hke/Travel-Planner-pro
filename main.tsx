@@ -286,14 +286,22 @@ async function verifyCloudD1Config(config:CloudD1Config){
 async function verifyCloudWorkerEndpoint(){
   const endpoint = getCloudWorkerEndpoint();
   if(!endpoint) throw new Error("Cloud worker endpoint missing.");
-  const response = await fetch(endpoint,{
-    method:"POST",
-    headers:{"content-type":"application/json"},
-    body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
-  });
-  const payload = await response.json();
-  if(!response.ok || payload?.ok !== true){
-    throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
+  try{
+    const response = await fetch(endpoint,{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+    });
+    const payload = await response.json();
+    if(!response.ok || payload?.ok !== true){
+      throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
+    }
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown worker request error.";
+    throw new Error(
+      `Worker verification failed for ${endpoint}. ${rawMessage} `+
+      "If this says 'Failed to fetch', check CORS allow-origin/headers, HTTPS certificate, and that the Worker route is publicly reachable."
+    );
   }
 }
 
@@ -314,7 +322,11 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
       }
       return payload?.data;
     }catch(error){
-      workerErrors.push(error instanceof Error ? error.message : "Unknown worker fetch error.");
+      const rawMessage = error instanceof Error ? error.message : "Unknown worker fetch error.";
+      workerErrors.push(
+        `Worker fetch failed for ${workerEndpoint}: ${rawMessage}. `+
+        "If this says 'Failed to fetch', verify Worker CORS headers and that the endpoint is reachable from the browser."
+      );
     }
   }
 
@@ -3024,7 +3036,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
     }finally{
-      setD1Testing(false);
+      setBusy(false);
     }
   };
 
@@ -3173,6 +3185,7 @@ export function App(){
   const sharedSyncReady = profilesMeta.hydrated && tripsMeta.hydrated && adminPwMeta.hydrated && siteCfgMeta.hydrated;
   const sharedSyncErrors = [profilesMeta.lastError,tripsMeta.lastError,adminPwMeta.lastError,siteCfgMeta.lastError].filter(Boolean);
   const syncStatusMessage = sharedSyncErrors[0] ?? "";
+  const sharedSyncHealthy = sharedSyncReady && sharedSyncErrors.length===0;
   const refreshSharedSync = useCallback(async()=>{
     setManualSyncing(true);
     try{
@@ -3186,12 +3199,14 @@ export function App(){
 
   const handleSignIn=(ident:string,pw:string)=>{
     if(!sharedSyncReady)return{ok:false,message:"Shared account data is still syncing. Please wait a moment and try again."};
+    if(!sharedSyncHealthy)return{ok:false,message:`Cloud sync has an error on this device: ${syncStatusMessage}`};
     const found=profiles.find(p=>(p.email.toLowerCase()===ident.trim().toLowerCase()||p.accountName.toLowerCase()===ident.trim().toLowerCase())&&p.password===pw);
     if(!found)return{ok:false,message:t("invalidCredentials")};
     setUserId(found.id);return{ok:true,message:"OK"};
   };
 
   const handleSignUp=(d:Omit<Profile,"id">)=>{
+    if(!sharedSyncHealthy)return{ok:false,message:`Cannot create a shared account until cloud sync is healthy on this device: ${syncStatusMessage}`};
     const accountName=upper(d.accountName);
     const phone=d.phone.trim();
     if(profiles.some(p=>p.email.toLowerCase()===d.email.trim().toLowerCase()))return{ok:false,message:t("emailExists")};
