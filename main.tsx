@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, SetStateAction, TextareaHTMLAttributes } from "react";
 import { createRoot } from "react-dom/client";
 import { motion } from "framer-motion";
 import { translations, type Language, type TKey } from "./i18n";
@@ -173,7 +173,14 @@ function calcDuration(s:string,e:string){
 }
 
 function usePersist<T>(key:string,init:T){
-  const [s,set]=useState<T>(()=>{try{const r=localStorage.getItem(key);return r?JSON.parse(r):init;}catch{return init;}});
+  const [s,setState]=useState<T>(()=>{try{const r=localStorage.getItem(key);return r?JSON.parse(r):init;}catch{return init;}});
+  const set = useCallback((next:SetStateAction<T>)=>{
+    setState(prev=>{
+      const resolved = typeof next === "function" ? (next as (value:T)=>T)(prev) : next;
+      try{localStorage.setItem(key,JSON.stringify(resolved));}catch{}
+      return resolved;
+    });
+  },[key]);
   useEffect(()=>{try{localStorage.setItem(key,JSON.stringify(s));}catch{}},[key,s]);
   return [s,set] as const;
 }
@@ -1023,6 +1030,41 @@ async function fetchMonthlyClimateData(point: GeoPoint) {
 
 function readFile(file:File):Promise<string>{
   return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result as string);r.onerror=rej;r.readAsDataURL(file);});
+}
+
+async function readImageFile(file:File,{maxDimension=1600,maxBytes=350_000}:{maxDimension?:number;maxBytes?:number}={}):Promise<string>{
+  const raw = await readFile(file);
+  if(file.type.startsWith("image/svg")) return raw;
+
+  const loadImage = (src:string)=>new Promise<HTMLImageElement>((resolve,reject)=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = ()=>reject(new Error("Failed to decode image."));
+    img.src = src;
+  });
+
+  const img = await loadImage(raw);
+  const scale = Math.min(1,maxDimension/Math.max(img.width,img.height));
+  const width = Math.max(1,Math.round(img.width*scale));
+  const height = Math.max(1,Math.round(img.height*scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if(!ctx) return raw;
+  ctx.drawImage(img,0,0,width,height);
+
+  let quality = 0.9;
+  let compressed = canvas.toDataURL("image/jpeg",quality);
+  while(compressed.length > maxBytes && quality > 0.35){
+    quality = +(quality - 0.1).toFixed(2);
+    compressed = canvas.toDataURL("image/jpeg",quality);
+  }
+
+  if(compressed.length > maxBytes){
+    throw new Error("Banner image is too large. Please use a smaller image.");
+  }
+  return compressed;
 }
 
 
@@ -2593,6 +2635,7 @@ function TripLuggage({trip,siteCfg,th,t,onAdd,onToggle,onRemove}:{trip:Trip;site
 function TripSettings({trip,isOwner,siteCfg,th,t,onUpdate}:{trip:Trip;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void}){
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
+  const [bannerMessage,setBannerMessage]=useState("");
   const [flightMessage,setFlightMessage]=useState("");
   const [hotelMessage,setHotelMessage]=useState("");
   const [flightSearchingId,setFlightSearchingId]=useState<string|null>(null);
@@ -2621,8 +2664,15 @@ function TripSettings({trip,isOwner,siteCfg,th,t,onUpdate}:{trip:Trip;isOwner:bo
 
   const handleBannerUpload=async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];if(!file)return;
-    const url=await readFile(file);
-    setForm(f=>({...f,bannerImage:url}));
+    try{
+      const url=await readImageFile(file);
+      setForm(f=>({...f,bannerImage:url}));
+      setBannerMessage("Banner uploaded. Remember to click Save.");
+    }catch(error){
+      setBannerMessage(error instanceof Error ? error.message : "Failed to process banner image.");
+    }finally{
+      e.target.value="";
+    }
   };
 
   const setBannerUrl=()=>{
@@ -2850,6 +2900,7 @@ function TripSettings({trip,isOwner,siteCfg,th,t,onUpdate}:{trip:Trip;isOwner:bo
           th==="dark"?"border-white/10 bg-white/5 hover:bg-white/10":"border-slate-300 bg-white hover:bg-slate-50")}>
           📤 {t("uploadBanner")}<input type="file" accept="image/*" className="hidden" onChange={handleBannerUpload}/>
         </label>
+        {bannerMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{bannerMessage}</p>}
         <div className="flex gap-2">
           <Input th={th} value={form.bannerImageUrl} onChange={e=>setForm(f=>({...f,bannerImageUrl:e.target.value}))} placeholder={t("bannerUrl")} className="flex-1"/>
           <Btn th={th} v="sec" onClick={setBannerUrl}>{t("add")}</Btn>
