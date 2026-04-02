@@ -340,7 +340,8 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const config = getCloudD1Config();
-  if(config.accountId && config.databaseId && config.apiToken){
+  const canUseDirectD1Fallback = !workerEndpoint && config.accountId && config.databaseId && config.apiToken;
+  if(canUseDirectD1Fallback){
     await ensureCloudD1Schema(config);
 
     if(action==="set"){
@@ -378,6 +379,9 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[0]}` : "";
+  if(workerEndpoint){
+    throw new Error(`Cloud sync failed in Worker mode.${workerMessage}`);
+  }
   throw new Error(`Cloud sync failed: unable to reach worker or D1 configuration is incomplete.${workerMessage}`);
 }
 
