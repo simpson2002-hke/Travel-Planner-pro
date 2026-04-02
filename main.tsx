@@ -193,6 +193,7 @@ const DEPLOYED_CLOUDFLARE_D1_DATABASE_ID = (import.meta.env.VITE_CLOUDFLARE_D1_D
 const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN ?? DEFAULT_CLOUDFLARE_API_TOKEN).trim();
 const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
+const CLOUD_EDITOR_PRIORITY_MS = 120000;
 
 type CloudD1Config = {
   accountId: string;
@@ -228,6 +229,25 @@ function getCloudWorkerEndpoint(){
   }catch{
     return DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
   }
+}
+
+function getCloudWorkerEndpointCandidates(){
+  const candidates: { endpoint: string; source: "override" | "deployed-default" }[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (endpoint: string | undefined, source: "override" | "deployed-default")=>{
+    const next = endpoint?.trim();
+    if(!next || seen.has(next)) return;
+    seen.add(next);
+    candidates.push({ endpoint: next, source });
+  };
+
+  try{
+    addCandidate(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY) ?? "", "override");
+  }catch{}
+
+  addCandidate(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT, "deployed-default");
+  return candidates;
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
@@ -315,10 +335,12 @@ async function verifyCloudWorkerEndpoint(endpointOverride?:string){
 }
 
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
-  const workerEndpoint = getCloudWorkerEndpoint();
+  const workerEndpoints = getCloudWorkerEndpointCandidates();
   const workerErrors: string[] = [];
+  const hasLocalOverride = workerEndpoints.some((item)=>item.source==="override");
 
-  if(workerEndpoint){
+  for(const candidate of workerEndpoints){
+    const workerEndpoint = candidate.endpoint;
     try{
       const resp = await fetch(workerEndpoint,{
         method:"POST",
@@ -328,6 +350,9 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
       const payload = await resp.json();
       if(!resp.ok || payload?.ok !== true){
         throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
+      }
+      if(hasLocalOverride && candidate.source==="deployed-default"){
+        setCloudWorkerEndpoint("");
       }
       return payload?.data;
     }catch(error){
@@ -340,7 +365,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const config = getCloudD1Config();
-  const canUseDirectD1Fallback = !workerEndpoint && config.accountId && config.databaseId && config.apiToken;
+  const canUseDirectD1Fallback = workerEndpoints.length===0 && config.accountId && config.databaseId && config.apiToken;
   if(canUseDirectD1Fallback){
     await ensureCloudD1Schema(config);
 
@@ -379,7 +404,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   }
 
   const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[0]}` : "";
-  if(workerEndpoint){
+  if(workerEndpoints.length>0){
     throw new Error(`Cloud sync failed in Worker mode.${workerMessage}`);
   }
   throw new Error(`Cloud sync failed: unable to reach worker or D1 configuration is incomplete.${workerMessage}`);
@@ -406,7 +431,10 @@ function parseCloudEnvelope<T>(value:unknown): CloudSyncEnvelope<T> | null{
 
 function useSharedPersist<T>(key:string,init:T){
   const [s,set]=usePersist<T>(key,init);
+  const initialSerializedRef = useRef(JSON.stringify(init));
   const stateRef = useRef(s);
+  const hasUnsyncedLocalRef = useRef(false);
+  const lastLocalEditAtRef = useRef(0);
   const hydratedRef = useRef(false);
   const syncPrimedRef = useRef(false);
   const skipNextPushRef = useRef(false);
@@ -428,6 +456,7 @@ function useSharedPersist<T>(key:string,init:T){
 
     await cloudStorageRequest("set",key,payload);
     latestRemoteAtRef.current = payload.updatedAt;
+    hasUnsyncedLocalRef.current = false;
     setLastError("");
   },[key]);
 
@@ -447,11 +476,21 @@ function useSharedPersist<T>(key:string,init:T){
     const envelope = parseCloudEnvelope<T>(remote.value);
     const remoteValue = envelope ? envelope.value : remote.value as T;
     const remoteUpdatedAt = envelope?.updatedAt ?? "";
+    const remoteDeviceId = envelope?.deviceId ?? "";
     const localSerialized = JSON.stringify(stateRef.current);
     const remoteSerialized = JSON.stringify(remoteValue);
+    const localLooksUnchanged = localSerialized === initialSerializedRef.current;
+    const isOtherDeviceUpdate = Boolean(remoteDeviceId) && remoteDeviceId !== deviceIdRef.current;
+    const localEditorHasPriority = isOtherDeviceUpdate && Date.now() - lastLocalEditAtRef.current < CLOUD_EDITOR_PRIORITY_MS;
     const shouldAdoptRemote =
-      !hydratedRef.current ||
-      (remoteUpdatedAt && remoteUpdatedAt > latestRemoteAtRef.current && remoteSerialized !== localSerialized);
+      (!hydratedRef.current && localLooksUnchanged) ||
+      (
+        remoteUpdatedAt &&
+        remoteUpdatedAt > latestRemoteAtRef.current &&
+        remoteSerialized !== localSerialized &&
+        !hasUnsyncedLocalRef.current &&
+        !localEditorHasPriority
+      );
 
     if(remoteUpdatedAt && remoteUpdatedAt > latestRemoteAtRef.current){
       latestRemoteAtRef.current = remoteUpdatedAt;
@@ -490,6 +529,8 @@ function useSharedPersist<T>(key:string,init:T){
       skipNextPushRef.current = false;
       return;
     }
+    lastLocalEditAtRef.current = Date.now();
+    hasUnsyncedLocalRef.current = true;
     pushRemote().catch((error)=>{
       setLastError(error instanceof Error ? error.message : "Cloud sync failed.");
     });
@@ -531,8 +572,15 @@ function useSharedPersist<T>(key:string,init:T){
   },[key,pullRemote,set]);
 
   const syncNow = useCallback(async()=>{
+    if(hasUnsyncedLocalRef.current){
+      try{
+        await pushRemote();
+      }catch(error){
+        setLastError(error instanceof Error ? error.message : "Cloud sync failed.");
+      }
+    }
     await pullRemote();
-  },[pullRemote]);
+  },[pullRemote,pushRemote]);
 
   return [s,set,{hydrated,lastError,syncNow}] as const;
 }
@@ -3144,6 +3192,13 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     }
   };
 
+  const resetWorkerEndpointToDefault = ()=>{
+    setCloudWorkerEndpoint("");
+    setWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+    setMsg("Using deployed default worker endpoint on this device.");
+    setErr("");
+  };
+
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
@@ -3159,6 +3214,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
+      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use Deployed Endpoint</Btn>
       <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
