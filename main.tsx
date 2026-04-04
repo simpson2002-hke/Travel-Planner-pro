@@ -10,7 +10,7 @@ import "./index.css";
    ═══════════════════════════════════════════════════════════════════════════════ */
 type ThemeMode = "light" | "dark";
 type ViewMode = "user" | "admin";
-type TripTab = "overview" | "travelers" | "itinerary" | "expenses" | "luggage" | "settings";
+type TripTab = "overview" | "travelers" | "itinerary" | "expenses" | "luggage" | "settings" | "instructions";
 type AdminTab = "trips" | "travelers" | "luggage" | "website" | "password";
 type UserSection = "dashboard" | "trips";
 
@@ -190,6 +190,7 @@ const getTripRole = (trip:Trip,userId:string):TripRole=>{
 const canEditSettings = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditItinerary = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditExpenses = (_role:TripRole)=>true;
+const tripRoleLabel = (role:TripRole,t:(k:TKey)=>string)=>role==="owner"?t("roleOwner"):role==="editor"?t("roleEditor"):t("roleViewer");
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -1872,7 +1873,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
   const tripTabs:{id:TripTab;label:string;icon:string}[]=[
     {id:"overview",label:t("overview"),icon:"📋"},{id:"travelers",label:t("travelers"),icon:"👥"},{id:"itinerary",label:t("itinerary"),icon:"🗓️"},
     {id:"expenses",label:t("expenses"),icon:"💰"},{id:"luggage",label:t("luggage"),icon:"🧳"},
-    {id:"settings",label:t("settings"),icon:"⚙️"},
+    {id:"settings",label:t("settings"),icon:"⚙️"},{id:"instructions",label:t("instructions"),icon:"📘"},
   ];
 
   return <div className={cx("space-y-6",isPortraitMobile&&"space-y-4")}>
@@ -1914,6 +1915,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onUpdateExpense={onUpdateExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} user={user} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack} onAddShared={onAddSharedPack} onRemoveShared={onRemoveSharedPack}/>}
     {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
+    {tab==="instructions"&&<TripInstructions th={th} t={t}/>}
   </div>;
 }
 
@@ -2255,7 +2257,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
       <div className="space-y-4">
         <div className="flex gap-2">
           <Input th={th} label={t("locationName")} value={customForm.query} onChange={e=>setCustomForm(f=>({...f,query:e.target.value}))} placeholder="City, country" className="flex-1"/>
-          <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("search")}</Btn>
+          <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("betterOutlook")}</Btn>
         </div>
         {searchResults.length>0&&<Select th={th} label="Matching Locations" value={customForm.selected ? `${customForm.selected.name}-${customForm.selected.lat}-${customForm.selected.lon}` : ""} onChange={e=>{
           const selected = searchResults.find(item=>`${item.name}-${item.lat}-${item.lon}`===e.target.value) ?? null;
@@ -2337,18 +2339,18 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
             </div>
           </div>
-          <Badge label={role} th={th} color={role==="owner"?"amber":role==="editor"?"green":"blue"}/>
+          <Badge label={tripRoleLabel(role,t)} th={th} color={role==="owner"?"amber":role==="editor"?"green":"blue"}/>
         </div>
 
         {isOwner&&member.id!==trip.ownerId&&<div>
           <p className={cx("text-xs mb-2",th==="dark"?"text-slate-400":"text-slate-500")}>Role</p>
           <div className="flex gap-2 flex-wrap">
-            {(["editor","viewer"] as TripRole[]).map(roleOption=><button key={roleOption} type="button" onClick={()=>setRole(member.id,roleOption)}
+            {(["editor","viewer"] as TripRole[]).map(roleOption=><button key={tripRoleLabel(roleOption,t)} type="button" onClick={()=>setRole(member.id,roleOption)}
               className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
                 role===roleOption
                   ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
                   :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
-              {roleOption}
+              {tripRoleLabel(roleOption,t)}
             </button>)}
           </div>
         </div>}
@@ -2366,7 +2368,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 
         <div className="grid gap-2">
           <InfoRow label={t("tripId")} value={trip.id} th={th}/>
-          <InfoRow label={t("status")} value={role} th={th}/>
+          <InfoRow label={t("status")} value={tripRoleLabel(role,t)} th={th}/>
           <InfoRow label={t("email")} value={member.email} th={th}/>
           <InfoRow label={t("phone")} value={member.phone} th={th}/>
           {member.nationality&&<InfoRow label={t("nationality")} value={member.nationality} th={th}/>} 
@@ -3104,6 +3106,28 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
   </div>;
 }
 
+function TripInstructions({th,t}:{th:ThemeMode;t:(k:TKey)=>string}){
+  const steps=[
+    {title:t("instructionOverviewTitle"),desc:t("instructionOverviewDesc")},
+    {title:t("instructionTravelersTitle"),desc:t("instructionTravelersDesc")},
+    {title:t("instructionItineraryTitle"),desc:t("instructionItineraryDesc")},
+    {title:t("instructionExpensesTitle"),desc:t("instructionExpensesDesc")},
+    {title:t("instructionLuggageTitle"),desc:t("instructionLuggageDesc")},
+    {title:t("instructionSettingsTitle"),desc:t("instructionSettingsDesc")},
+  ];
+
+  return <Card th={th} className="p-5 sm:p-8 space-y-5">
+    <h2 className="text-2xl font-bold">{t("instructionsTitle")}</h2>
+    <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("instructionsIntro")}</p>
+    <div className="grid gap-3">
+      {steps.map((step,index)=><div key={step.title} className={cx("rounded-2xl border p-4",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+        <p className="font-semibold">{index+1}. {step.title}</p>
+        <p className={cx("mt-1 text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{step.desc}</p>
+      </div>)}
+    </div>
+  </Card>;
+}
+
 function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
   const isMobileScreen=useMobileScreen();
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
@@ -3447,7 +3471,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
             <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="w-full"/>
-            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):`🔎 ${t("search")}`}</Btn>
+            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("betterOutlook")}</Btn>
           </div>
           {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
             <option value="">Select location</option>
