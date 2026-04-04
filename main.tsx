@@ -117,7 +117,6 @@ type SharedPersistMeta = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
-const ITINERARY_TRANSPORT_OPTIONS = ["Train","Bus","Flight","Taxi","Rental Car","Walk","Ferry","Other"];
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
   45:"Fog",48:"Rime fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
@@ -1225,28 +1224,6 @@ function combineDateTime(date:string,time:string){
   return time ? `${date}T${time}` : date;
 }
 
-function estimateDurationByDistanceKm(distanceKm:number,transport:string){
-  const speeds:Record<string,number>={"Walk":5,"Bus":28,"Train":80,"Taxi":35,"Rental Car":45,"Flight":700,"Ferry":30,"Other":25};
-  const speed=speeds[transport]??25;
-  const hours=distanceKm/Math.max(1,speed);
-  const mins=Math.max(10,Math.round(hours*60));
-  if(mins>=60){
-    const h=Math.floor(mins/60);
-    const m=mins%60;
-    return `${h}h${m?` ${m}m`:""}`;
-  }
-  return `${mins} min`;
-}
-
-function haversineKm(a:{lat:number;lon:number},b:{lat:number;lon:number}){
-  const toRad=(v:number)=>v*Math.PI/180;
-  const r=6371;
-  const dLat=toRad(b.lat-a.lat);
-  const dLon=toRad(b.lon-a.lon);
-  const aa=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
-  return r*2*Math.atan2(Math.sqrt(aa),Math.sqrt(1-aa));
-}
-
 function googleMapEmbedUrl(location:string){
   const q=encodeURIComponent(location.trim());
   if(!q)return "";
@@ -2265,9 +2242,10 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 }
 
 function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Walk",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"};
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
+    { value:"transport", label:t("transport") },
     { value:"free-time", label:t("freeTime") },
   ] as const;
   const emptyOptionalForm={day:1,type:"site" as OptionalStop["type"],title:"",location:"",url:"",notes:""};
@@ -2275,8 +2253,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const [day,setDay]=useState(1);
   const [form,setForm]=useState(emptyForm);
   const [editId,setEditId]=useState<string|null>(null);
-  const [transportEditId,setTransportEditId]=useState<string|null>(null);
-  const [transportForm,setTransportForm]=useState({duration:"",details:""});
   const [optionalForm,setOptionalForm]=useState(emptyOptionalForm);
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
@@ -2286,63 +2262,20 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const nextOrder=(trip.itinerary.filter(it=>it.day===day).reduce((max,it)=>Math.max(max,it.order),0))+1;
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
-  const myChecklist=(trip.itineraryChecklists ?? {})[user.id] ?? {};
-
-  const shouldKeepManualTransit=(transit?:TransitLeg)=>{
-    if(!transit?.duration&&!transit?.details) return false;
-    const details=(transit.details||"").toLowerCase();
-    return !details.startsWith("auto •");
-  };
-
-  const autoFillTransit=async(items:ItineraryItem[])=>{
-    if(items.length<2) return items;
-    const ordered=items.slice().sort((a,b)=>a.order-b.order);
-    const withTransit=[...ordered];
-
-    for(let i=0;i<withTransit.length;i++){
-      if(i===withTransit.length-1){
-        withTransit[i]={...withTransit[i],transitToNext:{duration:"",details:""}};
-        continue;
-      }
-      const cur=withTransit[i];
-      const nxt=withTransit[i+1];
-      if(shouldKeepManualTransit(cur.transitToNext)) continue;
-      if(!cur.stopLocation||!nxt.stopLocation) continue;
-      try{
-        const [aRes,bRes]=await Promise.all([
-          fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(cur.stopLocation)}`),
-          fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(nxt.stopLocation)}`),
-        ]);
-        const [aJson,bJson]=await Promise.all([aRes.json(),bRes.json()]);
-        const a=Array.isArray(aJson)&&aJson[0]?{lat:Number(aJson[0].lat),lon:Number(aJson[0].lon)}:null;
-        const b=Array.isArray(bJson)&&bJson[0]?{lat:Number(bJson[0].lat),lon:Number(bJson[0].lon)}:null;
-        if(a&&b){
-          const dist=haversineKm(a,b);
-          withTransit[i]={...cur,transitToNext:{duration:estimateDurationByDistanceKm(dist,cur.transport),details:`Auto • Approx. ${dist.toFixed(1)} km`}};
-        }
-      }catch{}
-    }
-    return withTransit;
-  };
-
-  const persistWithAutoTransit=async(nextItems:ItineraryItem[],targetDay:number)=>{
-    const dayUpdated=nextItems.filter(it=>it.day===targetDay);
-    const autoDay=await autoFillTransit(dayUpdated);
-    const map=new Map(autoDay.map(it=>[it.id,it]));
-    onUpdate(trip.id,nextItems.map(it=>it.day===targetDay?(map.get(it.id)??it):it));
-  };
+  const persistItems=(nextItems:ItineraryItem[])=>onUpdate(trip.id,nextItems);
 
   const saveActivity=async(e:React.FormEvent)=>{
     e.preventDefault();
     if(!canEdit) return;
     if(!form.title.trim())return;
+    const transportLabel = form.activityType==="transport" ? "Transport" : form.activityType==="free-time" ? "Free Time" : "Activity";
     const payload={
       startTime:form.startTime,
       endTime:form.endTime,
       endDayOffset:form.endDayOffset,
       title:form.title,
       stopLocation:form.stopLocation,
-      transport:form.transport,
+      transport:transportLabel,
       details:form.details,
       photo:form.photo,
       mapUrl:form.mapUrl||googleMapEmbedUrl(form.stopLocation),
@@ -2351,7 +2284,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     const next=editId
       ? trip.itinerary.map(it=>it.id===editId?{...it,...payload,day}:it)
       : [...trip.itinerary,{id:uid("it"),day,order:nextOrder,...payload,transitToNext:{duration:"",details:""}}];
-    await persistWithAutoTransit(next,day);
+    persistItems(next);
     setEditId(null);
     setForm(emptyForm);
   };
@@ -2364,7 +2297,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     [reordered[idx],reordered[swapWith]]=[reordered[swapWith],reordered[idx]];
     const orderMap=new Map(reordered.map((item,index)=>[item.id,index+1]));
     const next=trip.itinerary.map(it=>it.day===day?{...it,order:orderMap.get(it.id)??it.order}:it);
-    await persistWithAutoTransit(next,day);
+    persistItems(next);
   };
 
   const remove=async(id:string)=>{
@@ -2373,11 +2306,12 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     const remainingDay=remaining.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
     const orderMap=new Map(remainingDay.map((item,index)=>[item.id,index+1]));
     const next=remaining.map(it=>it.day===day?{...it,order:orderMap.get(it.id)??it.order}:it);
-    await persistWithAutoTransit(next,day);
+    persistItems(next);
   };
 
   const edit=(it:ItineraryItem)=>{
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":"regular") });
+    const mode=((it.startTime==="00:00"||it.startTime==="00:00:00")&&(it.endTime==="23:59"||it.endTime==="23:59:00"))?"whole-day":"timed";
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1 });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2389,25 +2323,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     const photo=await readFile(file);
     setForm(f=>({...f,photo}));
     e.target.value="";
-  };
-
-  const startTransportEdit=(it:ItineraryItem)=>{
-    setTransportEditId(it.id);
-    setTransportForm({duration:it.transitToNext?.duration??"",details:it.transitToNext?.details??""});
-  };
-
-  const saveTransport=(itemId:string)=>{
-    if(!canEdit) return;
-    onUpdate(trip.id,trip.itinerary.map(it=>it.id===itemId?{...it,transitToNext:{duration:transportForm.duration,details:transportForm.details}}:it));
-    setTransportEditId(null);
-    setTransportForm({duration:"",details:""});
-  };
-
-  const clearTransport=(itemId:string)=>{
-    if(!canEdit) return;
-    onUpdate(trip.id,trip.itinerary.map(it=>it.id===itemId?{...it,transitToNext:{duration:"",details:""}}:it));
-    setTransportEditId(null);
-    setTransportForm({duration:"",details:""});
   };
 
   const saveOptionalStop=(e:React.FormEvent)=>{
@@ -2431,10 +2346,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   };
 
   const removeOptionalStop=(id:string)=>onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(stop=>stop.id!==id)});
-  const toggleChecklistItem=(itemId:string)=>{
-    const nextForUser={...myChecklist,[itemId]:!myChecklist[itemId]};
-    onTripUpdate(trip.id,{itineraryChecklists:{...(trip.itineraryChecklists ?? {}),[user.id]:nextForUser}});
-  };
   const profileMap = new Map(profiles.map(profile=>[profile.id,profile]));
   const splitTimeline = dayItems
     .map(item=>({ sortTime:item.startTime || "23:59", item }))
@@ -2482,30 +2393,9 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
             <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1 min-w-0">
-                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.transport} th={th} color={it.activityType==="free-time"?"amber":undefined}/></div>
+                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
-                <label className="mt-3 inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
-                  <input type="checkbox" checked={Boolean(myChecklist[it.id])} onChange={()=>toggleChecklistItem(it.id)} disabled={!canEdit}/>
-                  My checklist done
-                </label>
-
-                {(it.transitToNext?.duration||it.transitToNext?.details)&&<div className={cx("mt-3 rounded-xl border border-dashed px-3 py-2",th==="dark"?"border-white/20":"border-slate-300")}>
-                  <p className="text-xs font-semibold uppercase">{t("transitTime")}</p>
-                  {it.transitToNext?.duration&&<Badge label={it.transitToNext.duration} th={th} color="amber"/>}
-                  {it.transitToNext?.details&&<p className="text-sm mt-1">{it.transitToNext.details}</p>}
-                </div>}
-
-                <div className="mt-2 flex gap-2">
-                  <Btn th={th} v="sec" sz="sm" onClick={()=>startTransportEdit(it)} disabled={!canEdit}>{t("editTransportDetail")}</Btn>
-                  {(it.transitToNext?.duration||it.transitToNext?.details)&&<Btn th={th} v="ghost" sz="sm" onClick={()=>clearTransport(it.id)} disabled={!canEdit}>{t("clearTransportDetail")}</Btn>}
-                </div>
-
-                {transportEditId===it.id&&<div className="mt-3 space-y-2">
-                  <Input th={th} label={t("transitTime")} value={transportForm.duration} onChange={e=>setTransportForm(f=>({...f,duration:e.target.value}))}/>
-                  <Textarea th={th} label={t("transitDetails")} value={transportForm.details} onChange={e=>setTransportForm(f=>({...f,details:e.target.value}))}/>
-                  <div className="flex gap-2"><Btn th={th} sz="sm" onClick={()=>saveTransport(it.id)}>{t("save")}</Btn><Btn th={th} v="sec" sz="sm" onClick={()=>setTransportEditId(null)}>{t("cancel")}</Btn></div>
-                </div>}
 
                 {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="mt-3 h-40 w-full rounded-2xl border border-white/10"/>}
                 {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-32 w-full rounded-2xl border border-white/10 object-cover"/>}
@@ -2540,7 +2430,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     </div>
 
     <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
-      {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>You can manage your own checklist, but only owner/co-owner can edit itinerary details.</p>}
+      {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Only owner/co-owner can edit itinerary details.</p>}
       <div className="mb-4">
         <h3 className="text-xl font-bold">{activePane==="schedule" ? (editId?t("edit"):t("addActivity")) : (optionalEditId?t("editOptionalPlace"):t("addOptionalPlace"))}</h3>
         <p className={cx("mt-2 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{activePane==="schedule" ? t("noItineraryDesc") : t("optionalPlacesDesc")}</p>
@@ -2549,12 +2439,14 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
       {activePane==="schedule" ? <form onSubmit={saveActivity} className="space-y-3">
         <Select
           th={th}
-          label="Activity Type"
+          label={t("activityType")}
           value={form.activityType}
           onChange={e=>{
             const mode=e.target.value;
             if(mode==="free-time"){
               setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:""}));
+            }else if(mode==="transport"){
+              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport")}));
             }else{
               setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title}));
             }
@@ -2562,20 +2454,31 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
         >
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
+        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+        <Select th={th} label={t("timeMode")} value={form.timeMode} onChange={e=>{
+          const nextMode=e.target.value as "timed"|"whole-day";
+          setForm(f=>nextMode==="whole-day"
+            ? {...f,timeMode:nextMode,startTime:"00:00",endTime:"23:59",endDayOffset:Math.max((f.dayCount||1)-1,0)}
+            : {...f,timeMode:nextMode,startTime:f.startTime==="00:00"?"09:00":f.startTime,endTime:f.endTime==="23:59"?"10:00":f.endTime,endDayOffset:0,dayCount:1});
+        }}>
+          <option value="timed">{t("timed")}</option>
+          <option value="whole-day">{t("wholeDay")}</option>
+        </Select>
         <Input th={th} label={t("startTime")} type="time" value={form.startTime} onChange={e=>setForm(f=>({...f,startTime:e.target.value}))}/>
         <Input th={th} label={t("endTime")} type="time" value={form.endTime} onChange={e=>setForm(f=>({...f,endTime:e.target.value}))}/>
-        <Input th={th} label={t("endDayOffset")} type="number" min={0} value={form.endDayOffset} onChange={e=>setForm(f=>({...f,endDayOffset:Number(e.target.value)||0}))}/>
-        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+        {form.timeMode==="whole-day"&&<Input th={th} label={t("numberOfDays")} type="number" min={1} value={form.dayCount} onChange={e=>{
+          const dayCount=Math.max(Number(e.target.value)||1,1);
+          setForm(f=>({...f,dayCount,endDayOffset:dayCount-1,startTime:"00:00",endTime:"23:59"}));
+        }}/>}
         <Input th={th} label={t("stopLocation")} value={form.stopLocation} onChange={e=>setForm(f=>({...f,stopLocation:e.target.value,mapUrl:googleMapEmbedUrl(e.target.value)}))}/>
         <Input th={th} label={t("googleMapUrl")} value={form.mapUrl} onChange={e=>setForm(f=>({...f,mapUrl:e.target.value}))}/>
         {form.mapUrl&&<iframe src={form.mapUrl} title="activity-map-preview" loading="lazy" className="h-40 w-full rounded-2xl border border-white/10"/>}
-        <Select th={th} label={t("transport")} value={form.transport} onChange={e=>setForm(f=>({...f,transport:e.target.value}))}>{ITINERARY_TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}</Select>
-        <Textarea th={th} label={t("details")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
         <div className="space-y-2">
           <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>🖼 {t("uploadPhoto")}<input type="file" accept="image/*" onChange={handlePhotoUpload}/></label>
           <Input th={th} label={t("photoUrl")} value={form.photo} onChange={e=>setForm(f=>({...f,photo:e.target.value}))}/>
           {form.photo&&<img src={form.photo} alt="preview" className="h-24 w-full rounded-2xl border border-white/10 object-cover"/>}
         </div>
+        <Textarea th={th} label={t("remarks")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
         <Btn th={th} type="submit" disabled={!canEdit}>{editId?t("save"):t("add")}</Btn>
         {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!canEdit}>{t("cancel")}</Btn>}
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
