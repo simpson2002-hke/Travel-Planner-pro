@@ -86,6 +86,7 @@ type Trip = {
   freeTimeEntries: FreeTimeEntry[];
   createdAt: string;
   customLocation?: {name:string;lat:number;lon:number};
+  weatherLocations?: { id: string; label: string; startDay: number; endDay: number; location: GeoPoint }[];
 };
 
 type WeatherData = {
@@ -95,6 +96,7 @@ type WeatherData = {
 };
 
 type GeoPoint = { name: string; lat: number; lon: number };
+type GeoSearchResult = GeoPoint & { subtitle: string };
 
 type WeatherApiSettings = { providerName: string; geocodeUrl: string; forecastUrl: string; flightLookupUrl: string; hotelLookupUrl: string; };
 type SiteSettings = {
@@ -776,7 +778,22 @@ function normTrip(i:unknown):Trip{
       notes: entry.notes ?? "",
     })) : [],
     createdAt:t.createdAt??new Date().toISOString(),
-    customLocation:t.customLocation };
+    customLocation:t.customLocation,
+    weatherLocations: Array.isArray((t as Partial<Trip>).weatherLocations)
+      ? (t as Partial<Trip>).weatherLocations!
+          .map((item, index) => ({
+            id: item?.id ?? uid(`wloc-${index}`),
+            label: item?.label ?? item?.location?.name ?? "",
+            startDay: typeof item?.startDay === "number" ? item.startDay : 1,
+            endDay: typeof item?.endDay === "number" ? item.endDay : Math.max(1, t.duration ?? calcDuration(start, end)),
+            location: {
+              name: item?.location?.name ?? item?.label ?? "",
+              lat: Number(item?.location?.lat ?? 0),
+              lon: Number(item?.location?.lon ?? 0),
+            },
+          }))
+          .filter(item=>item.label.trim() && Number.isFinite(item.location.lat) && Number.isFinite(item.location.lon))
+      : undefined };
 }
 
 function normSite(i:unknown):SiteSettings{
@@ -1062,6 +1079,30 @@ async function lookupLocation(siteCfg: SiteSettings, query: string): Promise<Geo
     return { name: loc.name ?? query, lat: loc.latitude, lon: loc.longitude };
   } catch {
     return null;
+  }
+}
+
+async function searchLocations(siteCfg: SiteSettings, query: string): Promise<GeoSearchResult[]> {
+  if (!query.trim()) return [];
+  try {
+    const baseUrl = buildUrl(siteCfg.weatherApi.geocodeUrl, { query });
+    const url = baseUrl.includes("count=") ? baseUrl.replace(/count=\d+/,"count=8") : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}count=8`;
+    const r = await fetch(url);
+    const d = await r.json();
+    return (d.results ?? []).slice(0, 8).map((loc: Record<string, unknown>) => {
+      const city = String(loc.name ?? query);
+      const admin = String(loc.admin1 ?? loc.admin2 ?? "").trim();
+      const country = String(loc.country ?? "").trim();
+      const subtitle = [admin, country].filter(Boolean).join(", ");
+      return {
+        name: city,
+        lat: Number(loc.latitude ?? 0),
+        lon: Number(loc.longitude ?? 0),
+        subtitle,
+      };
+    }).filter((loc: GeoSearchResult)=>Number.isFinite(loc.lat) && Number.isFinite(loc.lon));
+  } catch {
+    return [];
   }
 }
 
@@ -1846,7 +1887,10 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
   const [weather,setWeather]=useState<WeatherData|null>(null);
   const [loading,setLoading]=useState(false);
   const [showCustomLoc,setShowCustomLoc]=useState(false);
-  const [customForm,setCustomForm]=useState({name:trip.customLocation?.name||trip.location,lat:trip.customLocation?.lat||0,lon:trip.customLocation?.lon||0});
+  const [customForm,setCustomForm]=useState({query:"",selected:null as GeoSearchResult|null,startDay:1,endDay:Math.max(1,trip.duration)});
+  const [searchingLocation,setSearchingLocation]=useState(false);
+  const [searchResults,setSearchResults]=useState<GeoSearchResult[]>([]);
+  const [selectedWeatherLocationId,setSelectedWeatherLocationId]=useState("");
   const [noteText,setNoteText]=useState("");
   const [noteFiles,setNoteFiles]=useState<{url:string;name:string}[]>([]);
   const [urlInput,setUrlInput]=useState("");
@@ -1862,25 +1906,68 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
   const status=getTripStatus(trip);
   const isMobileScreen=useMobileScreen();
   const [mobileSection,setMobileSection]=useState<"flight"|"hotel"|"notes"|"weather">("flight");
+  const activeWeatherPlan = useMemo(()=>{
+    const plans = [...(trip.weatherLocations ?? [])].sort((a,b)=>a.startDay-b.startDay);
+    if(plans.length===0) return null;
+    return plans.find(item=>item.id===selectedWeatherLocationId) ?? plans[0];
+  },[trip.weatherLocations,selectedWeatherLocationId]);
 
   const loadWeather=async(point?:GeoPoint|null)=>{
     setLoading(true);
     try{
-      const resolved=point ?? (trip.customLocation ? {name:trip.customLocation.name,lat:trip.customLocation.lat,lon:trip.customLocation.lon} : await lookupLocation(siteCfg,trip.location));
+      const resolved=point
+        ?? activeWeatherPlan?.location
+        ?? (trip.customLocation ? {name:trip.customLocation.name,lat:trip.customLocation.lat,lon:trip.customLocation.lon} : await lookupLocation(siteCfg,trip.location));
       if(!resolved){setWeather(null);return;}
       setWeather(await fetchForecast(siteCfg,resolved));
     }finally{setLoading(false);}
   };
 
+  const runLocationSearch=async()=>{
+    if(!customForm.query.trim()) return;
+    setSearchingLocation(true);
+    setSearchResults(await searchLocations(siteCfg, customForm.query));
+    setSearchingLocation(false);
+  };
+
   const setCustomLocation=()=>{
     if(!canEdit) return;
-    const next={name:customForm.name,lat:Number(customForm.lat),lon:Number(customForm.lon)};
-    onUpdate(trip.id,{customLocation:next});
-    void loadWeather(next);
+    if(!customForm.selected) return;
+    const nextPlan = {
+      id: uid("wloc"),
+      label: `${customForm.selected.name}${customForm.selected.subtitle ? ` (${customForm.selected.subtitle})` : ""}`,
+      startDay: Math.max(1, Math.min(customForm.startDay, trip.duration)),
+      endDay: Math.max(1, Math.min(customForm.endDay, trip.duration)),
+      location: { name: customForm.selected.name, lat: customForm.selected.lat, lon: customForm.selected.lon },
+    };
+    const normalized = {
+      ...nextPlan,
+      startDay: Math.min(nextPlan.startDay, nextPlan.endDay),
+      endDay: Math.max(nextPlan.startDay, nextPlan.endDay),
+    };
+    const weatherLocations = [...(trip.weatherLocations ?? []), normalized].sort((a,b)=>a.startDay-b.startDay);
+    onUpdate(trip.id,{weatherLocations,customLocation:normalized.location});
+    setSelectedWeatherLocationId(normalized.id);
+    void loadWeather(normalized.location);
+    setCustomForm({query:"",selected:null,startDay:1,endDay:Math.max(1,trip.duration)});
+    setSearchResults([]);
     setShowCustomLoc(false);
   };
 
-  useEffect(()=>{ void loadWeather(); },[trip.id,trip.location,trip.customLocation?.lat,trip.customLocation?.lon,siteCfg.weatherApi.forecastUrl,siteCfg.weatherApi.geocodeUrl]);
+  const removeWeatherPlan=(planId:string)=>{
+    if(!canEdit) return;
+    const next = (trip.weatherLocations ?? []).filter(item=>item.id!==planId);
+    onUpdate(trip.id,{weatherLocations:next.length?next:undefined});
+    setSelectedWeatherLocationId(next[0]?.id ?? "");
+  };
+
+  useEffect(()=>{ void loadWeather(); },[trip.id,trip.location,trip.customLocation?.lat,trip.customLocation?.lon,activeWeatherPlan?.id,siteCfg.weatherApi.forecastUrl,siteCfg.weatherApi.geocodeUrl]);
+  useEffect(()=>{
+    if(!trip.weatherLocations?.length){ setSelectedWeatherLocationId(""); return; }
+    if(!trip.weatherLocations.find(item=>item.id===selectedWeatherLocationId)){
+      setSelectedWeatherLocationId(trip.weatherLocations[0].id);
+    }
+  },[trip.weatherLocations,selectedWeatherLocationId]);
 
   const addNote=()=>{
     if(!canEdit) return;
@@ -2084,10 +2171,19 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className={cx("text-sm uppercase tracking-[0.2em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("weather")}</p>
-          <h3 className="mt-1 text-xl font-bold leading-snug">{trip.customLocation?.name||trip.location}</h3>
+          <h3 className="mt-1 text-xl font-bold leading-snug">{activeWeatherPlan?.label || trip.customLocation?.name||trip.location}</h3>
         </div>
         <Btn th={th} v="sec" sz="sm" onClick={()=>void loadWeather()} disabled={loading}>{loading?t("loading"):t("refreshWeather")}</Btn>
       </div>
+      {trip.weatherLocations?.length ? <div className="space-y-2">
+        <Select th={th} label="Weather by Trip Days" value={selectedWeatherLocationId} onChange={e=>setSelectedWeatherLocationId(e.target.value)}>
+          {trip.weatherLocations.map(item=><option key={item.id} value={item.id}>{item.label} · Day {item.startDay}-{item.endDay}</option>)}
+        </Select>
+        {activeWeatherPlan&&<div className="flex items-center justify-between gap-2">
+          <p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>Day {activeWeatherPlan.startDay}-{activeWeatherPlan.endDay} · {activeWeatherPlan.location.name}</p>
+          <Btn th={th} v="danger" sz="sm" onClick={()=>removeWeatherPlan(activeWeatherPlan.id)} disabled={!canEdit}>{t("remove")}</Btn>
+        </div>}
+      </div> : null}
       {trip.customLocation&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{t("savedLocation")}: {trip.customLocation.name}</p>}
       <Btn th={th} v="ghost" sz="sm" onClick={()=>setShowCustomLoc(true)} disabled={!canEdit}>{t("customLocation")}</Btn>
       {!weather?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noWeatherLocation")}</p>
@@ -2123,12 +2219,25 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
 
     <Modal open={showCustomLoc} onClose={()=>setShowCustomLoc(false)} th={th} title={t("customLocation")}>
       <div className="space-y-4">
-        <Input th={th} label={t("locationName")} value={customForm.name} onChange={e=>setCustomForm(f=>({...f,name:e.target.value}))}/>
-        <Input th={th} label={t("latitude")} type="number" step="any" value={customForm.lat} onChange={e=>setCustomForm(f=>({...f,lat:+e.target.value}))}/>
-        <Input th={th} label={t("longitude")} type="number" step="any" value={customForm.lon} onChange={e=>setCustomForm(f=>({...f,lon:+e.target.value}))}/>
+        <div className="flex gap-2">
+          <Input th={th} label={t("locationName")} value={customForm.query} onChange={e=>setCustomForm(f=>({...f,query:e.target.value}))} placeholder="City, country" className="flex-1"/>
+          <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("search")}</Btn>
+        </div>
+        {searchResults.length>0&&<Select th={th} label="Matching Locations" value={customForm.selected ? `${customForm.selected.name}-${customForm.selected.lat}-${customForm.selected.lon}` : ""} onChange={e=>{
+          const selected = searchResults.find(item=>`${item.name}-${item.lat}-${item.lon}`===e.target.value) ?? null;
+          setCustomForm(f=>({...f,selected}));
+        }}>
+          <option value="">Select a location</option>
+          {searchResults.map(item=><option key={`${item.name}-${item.lat}-${item.lon}`} value={`${item.name}-${item.lat}-${item.lon}`}>{item.name}{item.subtitle ? ` — ${item.subtitle}` : ""}</option>)}
+        </Select>}
+        <div className="grid grid-cols-2 gap-3">
+          <Input th={th} label="Start Day" type="number" min={1} max={trip.duration} value={customForm.startDay} onChange={e=>setCustomForm(f=>({...f,startDay:+e.target.value}))}/>
+          <Input th={th} label="End Day" type="number" min={1} max={trip.duration} value={customForm.endDay} onChange={e=>setCustomForm(f=>({...f,endDay:+e.target.value}))}/>
+        </div>
+        {customForm.selected&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>Selected: {customForm.selected.name} ({customForm.selected.lat.toFixed(3)}, {customForm.selected.lon.toFixed(3)}) {customForm.selected.subtitle ? `· ${customForm.selected.subtitle}` : ""}</p>}
         <div className="flex justify-end gap-2">
           <Btn th={th} v="sec" onClick={()=>setShowCustomLoc(false)}>{t("cancel")}</Btn>
-          <Btn th={th} onClick={setCustomLocation} disabled={!canEdit}>{t("setCustom")}</Btn>
+          <Btn th={th} onClick={setCustomLocation} disabled={!canEdit||!customForm.selected}>{t("setCustom")}</Btn>
         </div>
       </div>
     </Modal>
@@ -2895,12 +3004,23 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const [mobileDetailSection,setMobileDetailSection]=useState<"none"|"flights"|"hotels"|"weather"|"banner">("none");
   const [expandedFlightIds,setExpandedFlightIds]=useState<string[]>([]);
   const [expandedHotelIds,setExpandedHotelIds]=useState<string[]>([]);
+  const [weatherQuery,setWeatherQuery]=useState("");
+  const [weatherSearching,setWeatherSearching]=useState(false);
+  const [weatherSearchResults,setWeatherSearchResults]=useState<GeoSearchResult[]>([]);
+  const [selectedWeatherResult,setSelectedWeatherResult]=useState<string>("");
+  const [weatherStartDay,setWeatherStartDay]=useState(1);
+  const [weatherEndDay,setWeatherEndDay]=useState(Math.max(1, trip.duration));
 
   useEffect(()=>{
     setForm({...trip,bannerImageUrl:""});
     setHasUnsavedChanges(false);
     setExpandedFlightIds((trip.flightLegs ?? []).map(leg=>leg.id));
     setExpandedHotelIds((trip.hotels ?? []).map(hotel=>hotel.id));
+    setWeatherStartDay(1);
+    setWeatherEndDay(Math.max(1, trip.duration));
+    setWeatherQuery("");
+    setWeatherSearchResults([]);
+    setSelectedWeatherResult("");
   },[trip]);
   useEffect(()=>{
     const baseline = JSON.stringify({...trip,bannerImageUrl:""});
@@ -3018,6 +3138,37 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
       updateHotel(target.id,{hotelName:suggestion.hotelName||baseName,hotelAddress:suggestion.hotelAddress||target.hotelAddress,roomType:suggestion.roomType||target.roomType,contact:suggestion.contact||target.contact});
       setHotelMessage(t("hotelAutoFilled"));
     }finally{setHotelSearchingId(null);}
+  };
+
+  const searchWeatherLocations=async()=>{
+    if(!weatherQuery.trim()) return;
+    setWeatherSearching(true);
+    setWeatherSearchResults(await searchLocations(siteCfg, weatherQuery));
+    setWeatherSearching(false);
+  };
+
+  const addWeatherLocationPlan=()=>{
+    const selected = weatherSearchResults.find(item=>`${item.name}-${item.lat}-${item.lon}`===selectedWeatherResult);
+    if(!selected) return;
+    const startDay = Math.max(1, Math.min(weatherStartDay, form.duration || 1));
+    const endDay = Math.max(1, Math.min(weatherEndDay, form.duration || 1));
+    const plan = {
+      id: uid("wloc"),
+      label: `${selected.name}${selected.subtitle ? ` (${selected.subtitle})` : ""}`,
+      startDay: Math.min(startDay, endDay),
+      endDay: Math.max(startDay, endDay),
+      location: { name: selected.name, lat: selected.lat, lon: selected.lon },
+    };
+    setForm(f=>({
+      ...f,
+      weatherLocations: [...(f.weatherLocations ?? []), plan].sort((a,b)=>a.startDay-b.startDay),
+      customLocation: plan.location,
+    }));
+    setSelectedWeatherResult("");
+  };
+
+  const removeWeatherLocationPlan=(id:string)=>{
+    setForm(f=>({...f, weatherLocations: (f.weatherLocations ?? []).filter(item=>item.id!==id)}));
   };
 
   const autofillFlight=async(leg:FlightLeg)=>{
@@ -3168,15 +3319,33 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
 
         {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <Input th={th} label={t("locationName")} value={form.customLocation?.name||""} onChange={e=>setForm(f=>({...f,customLocation:{name:e.target.value,lat:f.customLocation?.lat||0,lon:f.customLocation?.lon||0}}))}/>
-            <Input th={th} label={t("latitude")} type="number" step="any" value={form.customLocation?.lat||""} onChange={e=>setForm(f=>({...f,customLocation:{name:f.customLocation?.name||form.location,lat:+e.target.value,lon:f.customLocation?.lon||0}}))}/>
-            <Input th={th} label={t("longitude")} type="number" step="any" value={form.customLocation?.lon||""} onChange={e=>setForm(f=>({...f,customLocation:{name:f.customLocation?.name||form.location,lat:f.customLocation?.lat||0,lon:+e.target.value}}))}/>
+          <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
+          <div className="flex gap-2">
+            <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="flex-1"/>
+            <Btn th={th} v="sec" type="button" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("search")}</Btn>
+          </div>
+          {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
+            <option value="">Select location</option>
+            {weatherSearchResults.map(item=>{
+              const key=`${item.name}-${item.lat}-${item.lon}`;
+              return <option key={key} value={key}>{item.name}{item.subtitle ? ` — ${item.subtitle}` : ""}</option>;
+            })}
+          </Select>}
+          <div className="grid grid-cols-2 gap-3">
+            <Input th={th} label="Start Day" type="number" min={1} max={form.duration} value={weatherStartDay} onChange={e=>setWeatherStartDay(+e.target.value)}/>
+            <Input th={th} label="End Day" type="number" min={1} max={form.duration} value={weatherEndDay} onChange={e=>setWeatherEndDay(+e.target.value)}/>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
+            <Btn th={th} v="sec" type="button" onClick={addWeatherLocationPlan} disabled={!selectedWeatherResult}>+ Add Range</Btn>
             <Btn th={th} v="sec" type="button" onClick={()=>setForm(f=>({...f,customLocation:undefined}))}>{t("useDestination")}</Btn>
-            <Btn th={th} v="ghost" type="button" onClick={()=>setForm(f=>({...f,customLocation:{name:"",lat:0,lon:0}}))}>{t("remove")}</Btn>
+            <Btn th={th} v="ghost" type="button" onClick={()=>setForm(f=>({...f,weatherLocations:undefined,customLocation:undefined}))}>{t("remove")}</Btn>
           </div>
+          {(form.weatherLocations ?? []).length>0&&<div className="space-y-2">
+            {(form.weatherLocations ?? []).map(item=><div key={item.id} className={cx("flex items-center justify-between rounded-2xl px-3 py-2",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
+              <p className="text-sm">{item.label} · Day {item.startDay}-{item.endDay}</p>
+              <Btn th={th} v="danger" sz="sm" type="button" onClick={()=>removeWeatherLocationPlan(item.id)}>{t("remove")}</Btn>
+            </div>)}
+          </div>}
         </Card>}
       </div>
     </div>
