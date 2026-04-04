@@ -103,7 +103,7 @@ const en = {
   avgHigh: "Avg High", avgLow: "Avg Low", avgRain: "Avg Rain",
 
   day: "Day", time: "Time", startTime: "Start Time", endTime: "End Time", endDayOffset: "End Day Offset", googleMapUrl: "Google Map URL", activity: "Activity", stopLocation: "Stop Location", transport: "Transport",
-  details: "Details", addActivity: "Add Activity",
+  details: "Details", addActivity: "Add Activity", freeTime: "Free Time",
   moveUp: "Up", moveDown: "Down", removeActivity: "Remove",
   noItinerary: "No itinerary items yet",
   noItineraryDesc: "Plan your daily activities here.",
@@ -279,7 +279,7 @@ const zh: typeof en = {
   avgHigh: "均高", avgLow: "均低", avgRain: "均雨量",
 
   day: "日", time: "時間", startTime: "開始時間", endTime: "結束時間", endDayOffset: "跨日天數", googleMapUrl: "Google 地圖網址", activity: "活動", stopLocation: "停靠地點", transport: "交通方式",
-  details: "詳情", addActivity: "新增活動",
+  details: "詳情", addActivity: "新增活動", freeTime: "自由活動",
   moveUp: "上移", moveDown: "下移", removeActivity: "移除",
   noItinerary: "尚無行程項目",
   noItineraryDesc: "在此規劃每日活動。",
