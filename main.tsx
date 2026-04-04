@@ -117,7 +117,7 @@ type SharedPersistMeta = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
-const ITINERARY_TRANSPORT_OPTIONS = ["Train","Bus","Flight","Taxi","Rental Car","Walk","Ferry","Other"];
+const ITINERARY_TRANSPORT_OPTIONS = ["Train","Bus","Flight","Taxi","Rental Car","Walk","Ferry","Free Time","Other"];
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
   45:"Fog",48:"Rime fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
@@ -1000,7 +1000,7 @@ function getTripStatus(trip: Trip): "upcoming" | "active" | "past" {
 }
 
 function getStatusColor(status: ReturnType<typeof getTripStatus>): "green" | "blue" | "slate" {
-  return status === "upcoming" ? "green" : status === "past" ? "slate" : "blue";
+  return status === "upcoming" ? "amber" : status === "past" ? "slate" : "blue";
 }
 
 function formatForecastDate(date: string) {
@@ -1328,7 +1328,7 @@ function Card({children,th,className,onClick}:{children:ReactNode;th:ThemeMode;c
 }
 
 function Badge({label,th,color="slate"}:{label:string;th:ThemeMode;color?:"blue"|"green"|"amber"|"rose"|"slate"}){
-  const c={blue:"bg-blue-500/15 text-blue-400",green:"bg-emerald-500/15 text-emerald-400",amber:"bg-amber-500/15 text-amber-400",
+  const c={blue:"bg-blue-500/15 text-blue-400",green:"bg-emerald-500/15 text-emerald-400",amber:th==="dark"?"bg-amber-300 text-slate-950 ring-1 ring-amber-200/80 shadow-lg shadow-amber-400/25":"bg-amber-600 text-white ring-1 ring-amber-500/60",
     rose:"bg-rose-500/15 text-rose-400",slate:th==="dark"?"bg-white/8 text-slate-300":"bg-slate-100 text-slate-600"};
   return <span className={cx("rounded-full px-3 py-1 text-sm font-medium",c[color])}>{label}</span>;
 }
@@ -1410,7 +1410,7 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
         <select value={lang} onChange={e=>setLang(e.target.value as Language)}
           className={cx("rounded-full px-3 py-1.5 text-sm border outline-none transition",
             th==="dark"?"border-white/10 bg-white/5 text-white":"border-slate-300 bg-white text-slate-900")}>
-          <option value="en">EN</option><option value="zh">中文</option>
+          <option value="en" className="text-slate-900">EN</option><option value="zh" className="text-slate-900">中文</option>
         </select>
         <button onClick={()=>setTh(th==="dark"?"light":"dark")}
           className={cx("w-10 h-10 rounded-full flex items-center justify-center text-xl transition",
@@ -1570,6 +1570,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
   const now=new Date();
   const upcoming=trips.filter(tr=>new Date(tr.startDate)>now).length;
   const past=trips.filter(tr=>new Date(tr.endDate)<now).length;
+
 
   const save=()=>{onUpdate(form);setEditMode(false);};
 
@@ -1738,7 +1739,7 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
         📍 {trip.location} · {fmtDate(trip.startDate)} – {fmtDate(trip.endDate)}
       </p>
-      <p className={cx("text-sm font-semibold",status==="upcoming"?"text-emerald-400":status==="past"?(th==="dark"?"text-slate-400":"text-slate-600"):"text-cyan-400")}>{t("status")}: {t(status)}</p>
+      <p className={cx("text-sm font-semibold",status==="upcoming"?(th==="dark"?"text-amber-300":"text-amber-700"):status==="past"?(th==="dark"?"text-slate-400":"text-slate-600"):"text-cyan-400")}>{t("status")}: {t(status)}</p>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
         👥 {trip.members.length} {t("members")} · {trip.duration} {t("days")}
       </p>
@@ -2173,8 +2174,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const [transportForm,setTransportForm]=useState({duration:"",details:""});
   const [optionalForm,setOptionalForm]=useState(emptyOptionalForm);
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
-  const [freeTimeForm,setFreeTimeForm]=useState({startTime:"13:00",endTime:"15:00",title:"Free time",notes:""});
-  const [freeTimeEditId,setFreeTimeEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
 
   const dayItems=trip.itinerary.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
@@ -2183,7 +2182,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
   const myChecklist=(trip.itineraryChecklists ?? {})[user.id] ?? {};
-  const dayFreeTimeEntries=(trip.freeTimeEntries ?? []).filter(entry=>entry.day===day);
 
   const shouldKeepManualTransit=(transit?:TransitLeg)=>{
     if(!transit?.duration&&!transit?.details) return false;
@@ -2332,50 +2330,9 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     onTripUpdate(trip.id,{itineraryChecklists:{...(trip.itineraryChecklists ?? {}),[user.id]:nextForUser}});
   };
   const profileMap = new Map(profiles.map(profile=>[profile.id,profile]));
-  const nameFor = (profileId:string)=>{
-    const profile = profileMap.get(profileId);
-    return profile ? dn(profile) : "Unknown traveler";
-  };
-  const saveFreeTime=(e?:React.FormEvent)=>{
-    e?.preventDefault();
-    if(!freeTimeForm.title.trim()) return;
-    const normalized = { ...freeTimeForm, title: freeTimeForm.title.trim() };
-    const next = freeTimeEditId
-      ? (trip.freeTimeEntries ?? []).map(entry=>entry.id===freeTimeEditId?{...entry,...normalized,day}:entry)
-      : [{id:uid("ft"),day,editorId:user.id,participantIds:[user.id],pendingJoinIds:[],...normalized}, ...(trip.freeTimeEntries ?? [])];
-    onTripUpdate(trip.id,{freeTimeEntries:next});
-    setFreeTimeEditId(null);
-    setFreeTimeForm({startTime:"13:00",endTime:"15:00",title:"Free time",notes:""});
-  };
-  const editFreeTime=(entry:FreeTimeEntry)=>{
-    if(entry.editorId!==user.id) return;
-    setFreeTimeEditId(entry.id);
-    setFreeTimeForm({startTime:entry.startTime,endTime:entry.endTime,title:entry.title,notes:entry.notes});
-  };
-  const removeFreeTime=(entryId:string)=>onTripUpdate(trip.id,{freeTimeEntries:(trip.freeTimeEntries ?? []).filter(entry=>entry.id!==entryId)});
-  const requestJoinFreeTime=(entryId:string)=>{
-    const next=(trip.freeTimeEntries ?? []).map(entry=>{
-      if(entry.id!==entryId || entry.participantIds.includes(user.id) || entry.pendingJoinIds.includes(user.id)) return entry;
-      return {...entry,pendingJoinIds:[...entry.pendingJoinIds,user.id]};
-    });
-    onTripUpdate(trip.id,{freeTimeEntries:next});
-  };
-  const approveJoinRequest=(entryId:string,memberId:string)=>{
-    const next=(trip.freeTimeEntries ?? []).map(entry=>entry.id===entryId
-      ? {...entry,participantIds:entry.participantIds.includes(memberId)?entry.participantIds:[...entry.participantIds,memberId],pendingJoinIds:entry.pendingJoinIds.filter(id=>id!==memberId)}
-      : entry);
-    onTripUpdate(trip.id,{freeTimeEntries:next});
-  };
-  const declineJoinRequest=(entryId:string,memberId:string)=>{
-    onTripUpdate(trip.id,{freeTimeEntries:(trip.freeTimeEntries ?? []).map(entry=>entry.id===entryId?{...entry,pendingJoinIds:entry.pendingJoinIds.filter(id=>id!==memberId)}:entry)});
-  };
-
-  const splitTimeline = [
-    ...dayItems.map(item=>({kind:"itinerary" as const, sortTime:item.startTime || "23:59", item})),
-    ...dayFreeTimeEntries
-      .filter(entry=>entry.participantIds.includes(travelerView))
-      .map(entry=>({kind:"free" as const, sortTime:entry.startTime || "23:59", entry})),
-  ].sort((a,b)=>a.sortTime.localeCompare(b.sortTime));
+  const splitTimeline = dayItems
+    .map(item=>({ sortTime:item.startTime || "23:59", item }))
+    .sort((a,b)=>a.sortTime.localeCompare(b.sortTime));
 
   useEffect(()=>{
     setOptionalForm(current=>current.day===day?current:{...current,day});
@@ -2407,10 +2364,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
             </select>
           </div>
           <div className="space-y-2 text-sm">
-            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>No activities or free time for this traveler on Day {day}.</p>
-              :splitTimeline.map(entry=>entry.kind==="itinerary"
-                ? <p key={`it-${entry.item.id}`}>🗓️ {entry.item.startTime} {entry.item.title}</p>
-                : <p key={`ft-${entry.entry.id}`}>🕊️ {entry.entry.startTime} {entry.entry.title}</p>)}
+            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>No activities for this traveler on Day {day}.</p>
+              :splitTimeline.map(entry=><p key={`it-${entry.item.id}`}>🗓️ {entry.item.startTime} {entry.item.title}</p>)}
           </div>
         </div>
 
@@ -2421,7 +2376,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
             <div className="flex items-start gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1">
-                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.transport} th={th}/></div>
+                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.transport==="Free Time"?t("freeTime"):it.transport} th={th} color={it.transport==="Free Time"?"amber":undefined}/></div>
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
                 <label className="mt-3 inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
@@ -2453,34 +2408,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
             </div>
           </Card>
         </div>)}</div>}
-          <div className="mt-6 space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h4 className="text-lg font-semibold">Free time blocks</h4>
-              <span className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Day {day}</span>
-            </div>
-            {dayFreeTimeEntries.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>No free-time entries yet.</p>:dayFreeTimeEntries.map(entry=><Card key={entry.id} th={th} className="p-4 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold">{entry.startTime} - {entry.endTime} · {entry.title}</p>
-                <div className="flex gap-2">
-                  {entry.editorId===user.id&&<Btn th={th} v="sec" sz="sm" onClick={()=>editFreeTime(entry)}>Edit</Btn>}
-                  {entry.editorId===user.id&&<Btn th={th} v="danger" sz="sm" onClick={()=>removeFreeTime(entry.id)}>Remove</Btn>}
-                  {entry.editorId!==user.id&&!entry.participantIds.includes(user.id)&&!entry.pendingJoinIds.includes(user.id)&&<Btn th={th} v="sec" sz="sm" onClick={()=>requestJoinFreeTime(entry.id)}>Request to join</Btn>}
-                  {entry.pendingJoinIds.includes(user.id)&&<span className={cx("text-xs",th==="dark"?"text-amber-300":"text-amber-700")}>Join request pending</span>}
-                </div>
-              </div>
-              {entry.notes&&<p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{entry.notes}</p>}
-              <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Editor: {nameFor(entry.editorId)} · Participants: {entry.participantIds.map(nameFor).join(", ") || "None"}</p>
-              {entry.editorId===user.id&&entry.pendingJoinIds.length>0&&<div className="space-y-2">
-                <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Pending join requests</p>
-                {entry.pendingJoinIds.map(memberId=><div key={memberId} className="flex items-center justify-between gap-2">
-                  <span className="text-sm">{nameFor(memberId)}</span>
-                  <div className="flex gap-2">
-                    <Btn th={th} sz="sm" onClick={()=>approveJoinRequest(entry.id,memberId)}>Accept</Btn>
-                    <Btn th={th} v="sec" sz="sm" onClick={()=>declineJoinRequest(entry.id,memberId)}>Decline</Btn>
-                  </div>
-                </div>)}
-              </div>}
-            </Card>)}
+          <div className={cx("mt-6 rounded-2xl border p-4 text-sm",th==="dark"?"border-amber-300/30 bg-amber-300/10 text-amber-100":"border-amber-300 bg-amber-50 text-amber-800")}>
+            💡 Add <strong>{t("freeTime")}</strong> as a regular activity by selecting it in the {t("transport")} field.
           </div>
         </>) : (<div className="mt-6 space-y-4">
           {optionalDayItems.length===0?<Empty icon="📌" title={t("noOptionalPlaces")} desc={t("noOptionalPlacesDesc")} th={th}/>:optionalDayItems.map(stop=><Card key={stop.id} th={th} className="p-5">
@@ -2528,17 +2457,6 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
         </div>
         <Btn th={th} type="submit" disabled={!canEdit}>{editId?t("save"):t("add")}</Btn>
         {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!canEdit}>{t("cancel")}</Btn>}
-        <div className={cx("mt-4 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
-          <p className="mb-2 font-semibold">My free time</p>
-          <Input th={th} label="Start" type="time" value={freeTimeForm.startTime} onChange={e=>setFreeTimeForm(f=>({...f,startTime:e.target.value}))}/>
-          <Input th={th} label="End" type="time" value={freeTimeForm.endTime} onChange={e=>setFreeTimeForm(f=>({...f,endTime:e.target.value}))}/>
-          <Input th={th} label="Title" value={freeTimeForm.title} onChange={e=>setFreeTimeForm(f=>({...f,title:e.target.value}))}/>
-          <Textarea th={th} label="Notes" value={freeTimeForm.notes} onChange={e=>setFreeTimeForm(f=>({...f,notes:e.target.value}))}/>
-          <div className="mt-2 flex gap-2">
-            <Btn th={th} sz="sm" onClick={saveFreeTime} type="button">{freeTimeEditId?"Save free time":"Add free time"}</Btn>
-            {freeTimeEditId&&<Btn th={th} v="sec" sz="sm" type="button" onClick={()=>{setFreeTimeEditId(null);setFreeTimeForm({startTime:"13:00",endTime:"15:00",title:"Free time",notes:""});}}>Cancel</Btn>}
-          </div>
-        </div>
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
@@ -2868,10 +2786,16 @@ function TripSettings({trip,canEdit,siteCfg,th,t,onUpdate}:{trip:Trip;canEdit:bo
   const [hotelMessage,setHotelMessage]=useState("");
   const [flightSearchingId,setFlightSearchingId]=useState<string|null>(null);
   const [hotelSearchingId,setHotelSearchingId]=useState<string|null>(null);
+  const [hasUnsavedChanges,setHasUnsavedChanges]=useState(false);
   const [quickFlightNumber,setQuickFlightNumber]=useState("");
   const [quickHotelQuery,setQuickHotelQuery]=useState("");
 
-  useEffect(()=>{ setForm({...trip,bannerImageUrl:""}); },[trip]);
+  useEffect(()=>{ setForm({...trip,bannerImageUrl:""}); setHasUnsavedChanges(false); },[trip]);
+  useEffect(()=>{
+    const baseline = JSON.stringify({...trip,bannerImageUrl:""});
+    const current = JSON.stringify(form);
+    setHasUnsavedChanges(current!==baseline);
+  },[form,trip]);
 
   const save=()=>{
     const shouldKeepCustom=Boolean(form.customLocation?.name?.trim()) && Number.isFinite(form.customLocation?.lat) && Number.isFinite(form.customLocation?.lon) && !(form.customLocation?.lat===0 && form.customLocation?.lon===0 && !form.customLocation?.name.trim());
@@ -2886,6 +2810,7 @@ function TripSettings({trip,canEdit,siteCfg,th,t,onUpdate}:{trip:Trip;canEdit:bo
       departureTime:firstLeg?.departureTime??"", arrivalTime:firstLeg?.arrivalTime??"", terminal:firstLeg?.terminal??"", bookingReference:firstLeg?.bookingReference??"",
       hotelName:firstHotel?.hotelName??"", hotelAddress:firstHotel?.hotelAddress??"", roomType:firstHotel?.roomType??"", checkIn:firstHotel?.checkIn??"", checkOut:firstHotel?.checkOut??"", confirmationCode:firstHotel?.confirmationCode??"",
     });
+    setHasUnsavedChanges(false);
     setSaved(true);
     setTimeout(()=>setSaved(false),2000);
   };
@@ -3137,8 +3062,9 @@ function TripSettings({trip,canEdit,siteCfg,th,t,onUpdate}:{trip:Trip;canEdit:bo
     </div>
 
     <div className="flex gap-2 items-center">
-      <Btn th={th} onClick={save}>{t("save")}</Btn>
+      <Btn th={th} onClick={save} className="!bg-emerald-500 !text-white hover:!bg-emerald-400 !shadow-lg shadow-emerald-500/30">💾 {t("save")}</Btn>
       {saved&&<span className="text-emerald-400 font-medium">✓ {t("saved")}</span>}
+      {hasUnsavedChanges&&<span className={cx("font-medium",th==="dark"?"text-amber-300":"text-amber-700")}>⚠️ Remember to save your edits.</span>}
     </div>
   </Card>;
 }
@@ -3205,6 +3131,7 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
 }
 
 function AdminTrips({trips,th,t,onDelete}:{trips:Trip[];th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void}){
+  const [previewTrip,setPreviewTrip]=useState<Trip|null>(null);
   return <div className="space-y-3">
     <p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{trips.length} {t("adminTrips")}</p>
     {trips.length===0?<Empty icon="✈️" title={t("noTrips")} desc="" th={th}/>
@@ -3217,9 +3144,20 @@ function AdminTrips({trips,th,t,onDelete}:{trips:Trip[];th:ThemeMode;t:(k:TKey)=
           </p>
           <p className={cx("text-sm mt-0.5",th==="dark"?"text-slate-500":"text-slate-400")}>ID: {tr.id} · {t("owner")}: {tr.ownerName}</p>
         </div>
-        <Btn th={th} v="danger" sz="sm" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
+        <div className="flex gap-2">
+          <Btn th={th} v="sec" sz="sm" onClick={()=>setPreviewTrip(tr)}>{t("overview")}</Btn>
+          <Btn th={th} v="danger" sz="sm" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
+        </div>
       </div>
     </Card>)}
+    <Modal open={Boolean(previewTrip)} onClose={()=>setPreviewTrip(null)} th={th} title={previewTrip?.title}>
+      {previewTrip&&<div className="space-y-3">
+        <p>{previewTrip.location} · {fmtDate(previewTrip.startDate)} – {fmtDate(previewTrip.endDate)}</p>
+        <p>{t("owner")}: {previewTrip.ownerName}</p>
+        <p>{t("members")}: {previewTrip.members.length}</p>
+        <p>{t("status")}: {t(getTripStatus(previewTrip))}</p>
+      </div>}
+    </Modal>
   </div>;
 }
 
@@ -3332,6 +3270,7 @@ function AdminWebsite({th,t,settings,onSave}:{th:ThemeMode;t:(k:TKey)=>string;se
       <Btn th={th} type="submit">{t("save")}</Btn>
       <Btn th={th} v="sec" type="button" onClick={()=>setForm({...defaultSiteSettings})}>{t("resetDefaults")}</Btn>
       {saved&&<span className="text-emerald-400 font-medium">✓ {t("saved")}</span>}
+      {hasUnsavedChanges&&<span className={cx("font-medium",th==="dark"?"text-amber-300":"text-amber-700")}>⚠️ Remember to save your edits.</span>}
     </div>
   </form>;
 }
@@ -3524,7 +3463,7 @@ export function App(){
   const [profiles,setProfiles,profilesMeta]=useSharedPersist<Profile[]>(SK.profiles,[]);
   const [trips,setTrips,tripsMeta]=useSharedPersist<Trip[]>(SK.trips,[]);
   const [adminPw,setAdminPw,adminPwMeta]=useSharedPersist<string>(SK.adminPw,"");
-  const [adminAuth,setAdminAuth]=usePersist<boolean>(SK.adminAuth,false);
+  const [adminAuth,setAdminAuth]=useState(false);
   const [userId,setUserId]=usePersist<string>(SK.userId,"");
   const [siteCfg,setSiteCfg,siteCfgMeta]=useSharedPersist<SiteSettings>(SK.site,defaultSiteSettings);
   const [view,setView]=useState<ViewMode>("user");
