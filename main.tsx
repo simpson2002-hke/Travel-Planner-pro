@@ -54,7 +54,7 @@ type TransitLeg = { duration: string; details: string; };
 
 type ItineraryItem = {
   id: string; day: number; order: number; startTime: string; endTime: string; endDayOffset?: number; title: string; stopLocation: string; transport: string; details: string;
-  photo?: string; mapUrl?: string; transitToNext?: TransitLeg;
+  photo?: string; mapUrl?: string; transitToNext?: TransitLeg; activityType?: "regular" | "free-time";
 };
 
 type OptionalStop = {
@@ -117,7 +117,7 @@ type SharedPersistMeta = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
-const ITINERARY_TRANSPORT_OPTIONS = ["Train","Bus","Flight","Taxi","Rental Car","Walk","Ferry","Free Time","Other"];
+const ITINERARY_TRANSPORT_OPTIONS = ["Train","Bus","Flight","Taxi","Rental Car","Walk","Ferry","Other"];
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
   45:"Fog",48:"Rime fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
@@ -714,6 +714,7 @@ function normTrip(i:unknown):Trip{
       photo: (item as ItineraryItem).photo ?? "",
       mapUrl: (item as ItineraryItem).mapUrl ?? "",
       transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" },
+      activityType: (item as ItineraryItem).activityType ?? ((item as ItineraryItem).transport === "Free Time" ? "free-time" : "regular"),
     })),
     optionalStops: Array.isArray((t as Partial<Trip>).optionalStops) ? (t as Partial<Trip>).optionalStops!.map((stop, index) => ({
       id: stop.id ?? uid(`opt-${index}`), day: typeof stop.day === "number" ? stop.day : 1,
@@ -1748,20 +1749,21 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
   </Card>;
 }
 
-function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp}:{
+function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp,readOnly=false}:{
   trip:Trip;user:Profile;profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onBack:()=>void;
   onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onAddExp:(tid:string,e:Omit<Expense,"id">)=>void;
   onAddPack:(tid:string,l:string,cat:string)=>void;onTogglePack:(tid:string,iid:string)=>void;
   onAddSharedPack:(tid:string,l:string,cat:string)=>void;onRemoveSharedPack:(tid:string,iid:string)=>void;
   onRemovePack:(tid:string,iid:string)=>void;onUpdateItin:(tid:string,items:ItineraryItem[])=>void;
   onRemoveExp:(tid:string,eid:string)=>void;
+  readOnly?: boolean;
 }){
   const [tab,setTab]=useState<TripTab>("overview");
   const role=getTripRole(trip,user.id);
   const isOwner=role==="owner";
-  const canManageSettings=canEditSettings(role);
-  const canManageItinerary=canEditItinerary(role);
-  const canManageExpenses=canEditExpenses(role);
+  const canManageSettings=!readOnly&&canEditSettings(role);
+  const canManageItinerary=!readOnly&&canEditItinerary(role);
+  const canManageExpenses=!readOnly&&canEditExpenses(role);
   const status=getTripStatus(trip);
 
   const tripTabs:{id:TripTab;label:string;icon:string}[]=[
@@ -1799,7 +1801,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
 
     <Tabs tabs={tripTabs} active={tab} onChange={setTab} th={th}/>
 
-    {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate}/>} 
+    {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} canEdit={!readOnly} th={th} t={t} onUpdate={onUpdate}/>} 
     {tab==="travelers"&&<TripTravelers trip={trip} user={user} profiles={profiles} th={th} t={t} onUpdateTrip={onUpdate}/>} 
     {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
     {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onRemove={onRemoveExp}/>}
@@ -1808,7 +1810,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
   </div>;
 }
 
-function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user:Profile;profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void}){
+function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:Trip;user:Profile;profiles:Profile[];siteCfg:SiteSettings;canEdit:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void}){
   const [weather,setWeather]=useState<WeatherData|null>(null);
   const [loading,setLoading]=useState(false);
   const [showCustomLoc,setShowCustomLoc]=useState(false);
@@ -1837,6 +1839,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
   };
 
   const setCustomLocation=()=>{
+    if(!canEdit) return;
     const next={name:customForm.name,lat:Number(customForm.lat),lon:Number(customForm.lon)};
     onUpdate(trip.id,{customLocation:next});
     void loadWeather(next);
@@ -1846,6 +1849,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
   useEffect(()=>{ void loadWeather(); },[trip.id,trip.location,trip.customLocation?.lat,trip.customLocation?.lon,siteCfg.weatherApi.forecastUrl,siteCfg.weatherApi.geocodeUrl]);
 
   const addNote=()=>{
+    if(!canEdit) return;
     if(!noteText.trim()&&noteFiles.length===0)return;
     const note:TravelNote={id:uid("tn"),text:noteText.trim(),attachments:noteFiles,createdAt:new Date().toISOString(),authorId:user.id,authorName:dn(user)};
     onUpdate(trip.id,{travelNotes:[note,...trip.travelNotes]});
@@ -1866,7 +1870,10 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
     setUrlInput("");
   };
 
-  const removeNote=(nid:string)=>onUpdate(trip.id,{travelNotes:trip.travelNotes.filter(n=>n.id!==nid)});
+  const removeNote=(nid:string)=>{
+    if(!canEdit) return;
+    onUpdate(trip.id,{travelNotes:trip.travelNotes.filter(n=>n.id!==nid)});
+  };
 
   return <div className="grid xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,340px)] gap-6">
     <div className="space-y-6">
@@ -1989,21 +1996,21 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
       <Card th={th} className="p-7 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-2xl font-bold">{t("travelNotes")}</h3>
-          <Btn th={th} sz="sm" onClick={addNote}>+ {t("addNote")}</Btn>
+          <Btn th={th} sz="sm" onClick={addNote} disabled={!canEdit}>+ {t("addNote")}</Btn>
         </div>
-        <Textarea th={th} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={t("noteText")} className="min-h-32"/>
+        <Textarea th={th} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder={t("noteText")} className="min-h-32" disabled={!canEdit}/>
         <div className="flex flex-wrap gap-3 items-center">
           <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>
-            📎 {t("uploadFile")}<input type="file" multiple onChange={handleFileUpload}/>
+            📎 {t("uploadFile")}<input type="file" multiple onChange={handleFileUpload} disabled={!canEdit}/>
           </label>
           <div className="flex flex-1 min-w-[220px] gap-2">
-            <Input th={th} value={urlInput} onChange={e=>setUrlInput(e.target.value)} placeholder={t("fileUrl")} className="flex-1"/>
-            <Btn th={th} v="sec" sz="sm" onClick={addUrl}>{t("add")}</Btn>
+            <Input th={th} value={urlInput} onChange={e=>setUrlInput(e.target.value)} placeholder={t("fileUrl")} className="flex-1" disabled={!canEdit}/>
+            <Btn th={th} v="sec" sz="sm" onClick={addUrl} disabled={!canEdit}>{t("add")}</Btn>
           </div>
         </div>
         {noteFiles.length>0&&<div className="space-y-2">{noteFiles.map((file,index)=><div key={`${file.name}-${index}`} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3",th==="dark"?"bg-white/6":"bg-slate-100")}>
           <span className="truncate font-medium">{file.name}</span>
-          <button onClick={()=>setNoteFiles(files=>files.filter((_,fileIndex)=>fileIndex!==index))} className="text-rose-400">✕</button>
+          <button onClick={()=>setNoteFiles(files=>files.filter((_,fileIndex)=>fileIndex!==index))} className="text-rose-400" disabled={!canEdit}>✕</button>
         </div>)}</div>}
         {trip.travelNotes.length===0?<Empty icon="📝" title={t("noNotes")} desc={t("noNotesDesc")} th={th}/>
         :<div className="space-y-4">{trip.travelNotes.map(note=><div key={note.id} className={cx("rounded-3xl p-5 border",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
@@ -2012,7 +2019,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
               <p className="font-semibold">{note.authorName}</p>
               <p className={cx("text-xs",th==="dark"?"text-slate-500":"text-slate-400")}>{new Date(note.createdAt).toLocaleString()}</p>
             </div>
-            <button onClick={()=>removeNote(note.id)} className="text-rose-400 opacity-70 hover:opacity-100">✕</button>
+            <button onClick={()=>removeNote(note.id)} className="text-rose-400 opacity-70 hover:opacity-100" disabled={!canEdit}>✕</button>
           </div>
           {note.text&&<p className="mb-4 whitespace-pre-wrap">{note.text}</p>}
           {note.attachments.length>0&&<div className="grid sm:grid-cols-2 gap-3">{note.attachments.map((att,index)=><a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noreferrer" download={att.name} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3 border transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06] text-cyan-300":"border-slate-200 bg-white hover:bg-slate-50 text-blue-700")}>
@@ -2032,7 +2039,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
         <Btn th={th} v="sec" sz="sm" onClick={()=>void loadWeather()} disabled={loading}>{loading?t("loading"):t("refreshWeather")}</Btn>
       </div>
       {trip.customLocation&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{t("savedLocation")}: {trip.customLocation.name}</p>}
-      <Btn th={th} v="ghost" sz="sm" onClick={()=>setShowCustomLoc(true)}>{t("customLocation")}</Btn>
+      <Btn th={th} v="ghost" sz="sm" onClick={()=>setShowCustomLoc(true)} disabled={!canEdit}>{t("customLocation")}</Btn>
       {!weather?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noWeatherLocation")}</p>
       :<>
         <div className={cx("rounded-[2rem] border p-6",th==="dark"?"border-white/8 bg-white/[0.04]":"border-slate-200 bg-slate-50")}>
@@ -2071,7 +2078,7 @@ function TripOverview({trip,user,profiles,siteCfg,th,t,onUpdate}:{trip:Trip;user
         <Input th={th} label={t("longitude")} type="number" step="any" value={customForm.lon} onChange={e=>setCustomForm(f=>({...f,lon:+e.target.value}))}/>
         <div className="flex justify-end gap-2">
           <Btn th={th} v="sec" onClick={()=>setShowCustomLoc(false)}>{t("cancel")}</Btn>
-          <Btn th={th} onClick={setCustomLocation}>{t("setCustom")}</Btn>
+          <Btn th={th} onClick={setCustomLocation} disabled={!canEdit}>{t("setCustom")}</Btn>
         </div>
       </div>
     </Modal>
@@ -2165,7 +2172,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 }
 
 function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Walk",details:"",photo:"",mapUrl:""};
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Walk",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
     { value:"free-time", label:t("freeTime") },
@@ -2246,6 +2253,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
       details:form.details,
       photo:form.photo,
       mapUrl:form.mapUrl||googleMapEmbedUrl(form.stopLocation),
+      activityType:form.activityType,
     };
     const next=editId
       ? trip.itinerary.map(it=>it.id===editId?{...it,...payload,day}:it)
@@ -2276,7 +2284,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   };
 
   const edit=(it:ItineraryItem)=>{
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"" });
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":"regular") });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2381,11 +2389,11 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
             <div className="flex items-start gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1">
-                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.transport==="Free Time"?t("freeTime"):it.transport} th={th} color={it.transport==="Free Time"?"amber":undefined}/></div>
+                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.transport} th={th} color={it.activityType==="free-time"?"amber":undefined}/></div>
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
                 <label className="mt-3 inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
-                  <input type="checkbox" checked={Boolean(myChecklist[it.id])} onChange={()=>toggleChecklistItem(it.id)}/>
+                  <input type="checkbox" checked={Boolean(myChecklist[it.id])} onChange={()=>toggleChecklistItem(it.id)} disabled={!canEdit}/>
                   My checklist done
                 </label>
 
@@ -2414,7 +2422,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
           </Card>
         </div>)}</div>}
           <div className={cx("mt-6 rounded-2xl border p-4 text-sm",th==="dark"?"border-amber-300/30 bg-amber-300/10 text-amber-100":"border-amber-300 bg-amber-50 text-amber-800")}>
-            💡 Add <strong>{t("freeTime")}</strong> as a regular activity by selecting it in the {t("transport")} field.
+            💡 {t("freeTime")} is now an activity category. Choose it via Activity Type.
           </div>
         </>) : (<div className="mt-6 space-y-4">
           {optionalDayItems.length===0?<Empty icon="📌" title={t("noOptionalPlaces")} desc={t("noOptionalPlacesDesc")} th={th}/>:optionalDayItems.map(stop=><Card key={stop.id} th={th} className="p-5">
@@ -2449,13 +2457,13 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
         <Select
           th={th}
           label="Activity Type"
-          value={form.transport==="Free Time" ? "free-time" : "regular"}
+          value={form.activityType}
           onChange={e=>{
             const mode=e.target.value;
             if(mode==="free-time"){
-              setForm(f=>({...f,transport:"Free Time",title:t("freeTime"),stopLocation:"",mapUrl:""}));
+              setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:""}));
             }else{
-              setForm(f=>({...f,transport:"Walk",title:f.title===t("freeTime")?"":f.title}));
+              setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title}));
             }
           }}
         >
@@ -2464,7 +2472,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
         <Input th={th} label={t("startTime")} type="time" value={form.startTime} onChange={e=>setForm(f=>({...f,startTime:e.target.value}))}/>
         <Input th={th} label={t("endTime")} type="time" value={form.endTime} onChange={e=>setForm(f=>({...f,endTime:e.target.value}))}/>
         <Input th={th} label={t("endDayOffset")} type="number" min={0} value={form.endDayOffset} onChange={e=>setForm(f=>({...f,endDayOffset:Number(e.target.value)||0}))}/>
-        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} disabled={form.transport==="Free Time"}/>
+        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
         <Input th={th} label={t("stopLocation")} value={form.stopLocation} onChange={e=>setForm(f=>({...f,stopLocation:e.target.value,mapUrl:googleMapEmbedUrl(e.target.value)}))}/>
         <Input th={th} label={t("googleMapUrl")} value={form.mapUrl} onChange={e=>setForm(f=>({...f,mapUrl:e.target.value}))}/>
         {form.mapUrl&&<iframe src={form.mapUrl} title="activity-map-preview" loading="lazy" className="h-40 w-full rounded-2xl border border-white/10"/>}
@@ -3153,7 +3161,7 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
     </div>
     <Tabs tabs={adminTabs} active={tab} onChange={setTab} th={th}/>
 
-    {tab==="trips"&&<AdminTrips trips={trips} th={th} t={t} onDelete={onDeleteTrip}/>}
+    {tab==="trips"&&<AdminTrips trips={trips} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onDelete={onDeleteTrip}/>}
     {tab==="travelers"&&<AdminTravelers profiles={profiles} trips={trips} th={th} t={t} onDelete={onDeleteTraveler}/>}
     {tab==="luggage"&&<AdminLuggageCfg th={th} t={t} settings={siteCfg} onSave={setSiteCfg}/>}
     {tab==="website"&&<div className="space-y-6">
@@ -3164,8 +3172,17 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
   </div>;
 }
 
-function AdminTrips({trips,th,t,onDelete}:{trips:Trip[];th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void}){
+function AdminTrips({trips,profiles,siteCfg,th,t,onDelete}:{trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void}){
   const [previewTrip,setPreviewTrip]=useState<Trip|null>(null);
+  const previewUser = useMemo<Profile>(()=>({
+    id:"admin-preview-viewer",
+    accountName:"ADMINP0000",
+    firstName:"Admin",
+    lastName:"Preview",
+    email:"preview@local",
+    phone:"",
+    password:"",
+  }),[]);
   return <div className="space-y-3">
     <p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{trips.length} {t("adminTrips")}</p>
     {trips.length===0?<Empty icon="✈️" title={t("noTrips")} desc="" th={th}/>
@@ -3185,31 +3202,26 @@ function AdminTrips({trips,th,t,onDelete}:{trips:Trip[];th:ThemeMode;t:(k:TKey)=
       </div>
     </Card>)}
     <Modal open={Boolean(previewTrip)} onClose={()=>setPreviewTrip(null)} th={th} title={previewTrip?.title}>
-      {previewTrip&&<div className="space-y-3">
-        <p>{previewTrip.location} · {fmtDate(previewTrip.startDate)} – {fmtDate(previewTrip.endDate)}</p>
-        <p>{t("owner")}: {previewTrip.ownerName}</p>
-        <p>{t("members")}: {previewTrip.members.length}</p>
-        <p>{t("status")}: {t(getTripStatus(previewTrip))}</p>
-        <div className={cx("rounded-2xl p-4 text-sm space-y-2",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-          <p className="font-semibold">{t("flightLegs")} ({previewTrip.flightLegs.length})</p>
-          {previewTrip.flightLegs.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-600")}>—</p>
-            :previewTrip.flightLegs.map(leg=><p key={leg.id}>{leg.flightNumber || "—"} · {leg.departureAirport || "—"} → {leg.arrivalAirport || "—"}</p>)}
-        </div>
-        <div className={cx("rounded-2xl p-4 text-sm space-y-2",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-          <p className="font-semibold">{t("hotelStays")} ({previewTrip.hotels.length})</p>
-          {previewTrip.hotels.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-600")}>—</p>
-            :previewTrip.hotels.map(hotel=><p key={hotel.id}>{hotel.hotelName || "—"} · {hotel.checkIn || "—"} → {hotel.checkOut || "—"}</p>)}
-        </div>
-        <div className={cx("rounded-2xl p-4 text-sm space-y-2",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-          <p className="font-semibold">{t("itinerary")} ({previewTrip.itinerary.length})</p>
-          {previewTrip.itinerary.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-600")}>—</p>
-            :previewTrip.itinerary.slice().sort((a,b)=>a.day===b.day?a.order-b.order:a.day-b.day).slice(0,10).map(it=><p key={it.id}>Day {it.day} · {it.startTime}-{it.endTime} · {it.title}</p>)}
-        </div>
-        {previewTrip.notes&&<div className={cx("rounded-2xl p-4 text-sm",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-          <p className="font-semibold">{t("generalNotes")}</p>
-          <p className="mt-1 whitespace-pre-wrap">{previewTrip.notes}</p>
-        </div>}
-      </div>}
+      {previewTrip&&<TripDetail
+        trip={previewTrip}
+        user={previewUser}
+        profiles={profiles}
+        siteCfg={siteCfg}
+        th={th}
+        t={t}
+        onBack={()=>setPreviewTrip(null)}
+        onUpdate={()=>{}}
+        onDeleteTrip={()=>{}}
+        onAddExp={()=>{}}
+        onAddPack={()=>{}}
+        onTogglePack={()=>{}}
+        onRemovePack={()=>{}}
+        onAddSharedPack={()=>{}}
+        onRemoveSharedPack={()=>{}}
+        onUpdateItin={()=>{}}
+        onRemoveExp={()=>{}}
+        readOnly
+      />}
     </Modal>
   </div>;
 }
@@ -3291,12 +3303,13 @@ function AdminLuggageCfg({th,t,settings,onSave}:{th:ThemeMode;t:(k:TKey)=>string
 }
 
 function AdminWebsite({th,t,settings,onSave}:{th:ThemeMode;t:(k:TKey)=>string;settings:SiteSettings;onSave:(s:SiteSettings)=>void}){
-  const [form,setForm]=useState({...settings});
+  const [form,setForm]=useState<SiteSettings>(normSite(settings));
   const [saved,setSaved]=useState(false);
   const [hasUnsavedChanges,setHasUnsavedChanges]=useState(false);
-  useEffect(()=>{ setForm({...settings}); setHasUnsavedChanges(false); },[settings]);
+  useEffect(()=>{ setForm(normSite(settings)); setHasUnsavedChanges(false); },[settings]);
   useEffect(()=>{
-    setHasUnsavedChanges(JSON.stringify(form)!==JSON.stringify(settings));
+    const normalizedSettings = normSite(settings);
+    setHasUnsavedChanges(JSON.stringify(form)!==JSON.stringify(normalizedSettings));
   },[form,settings]);
   const submit=(e:React.FormEvent)=>{e.preventDefault();onSave(form);setSaved(true);setTimeout(()=>setSaved(false),2000);};
 
