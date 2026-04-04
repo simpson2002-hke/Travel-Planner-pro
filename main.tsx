@@ -3207,26 +3207,28 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{
       </div>
     </Card>)}
     <Modal open={Boolean(previewTrip)} onClose={()=>setPreviewTrip(null)} th={th} title={previewTrip?.title} size="full" mobileFullscreen>
-      {previewTrip&&<TripDetail
-        trip={previewTrip}
-        user={previewUser}
-        profiles={profiles}
-        siteCfg={siteCfg}
-        th={th}
-        t={t}
-        onBack={()=>setPreviewTrip(null)}
-        onUpdate={()=>{}}
-        onDeleteTrip={()=>{}}
-        onAddExp={()=>{}}
-        onAddPack={()=>{}}
-        onTogglePack={()=>{}}
-        onRemovePack={()=>{}}
-        onAddSharedPack={()=>{}}
-        onRemoveSharedPack={()=>{}}
-        onUpdateItin={()=>{}}
-        onRemoveExp={()=>{}}
-        readOnly
-      />}
+      <div className="mobile-compact-preview">
+        {previewTrip&&<TripDetail
+          trip={previewTrip}
+          user={previewUser}
+          profiles={profiles}
+          siteCfg={siteCfg}
+          th={th}
+          t={t}
+          onBack={()=>setPreviewTrip(null)}
+          onUpdate={()=>{}}
+          onDeleteTrip={()=>{}}
+          onAddExp={()=>{}}
+          onAddPack={()=>{}}
+          onTogglePack={()=>{}}
+          onRemovePack={()=>{}}
+          onAddSharedPack={()=>{}}
+          onRemoveSharedPack={()=>{}}
+          onUpdateItin={()=>{}}
+          onRemoveExp={()=>{}}
+          readOnly
+        />}
+      </div>
     </Modal>
   </div>;
 }
@@ -3681,7 +3683,7 @@ export function App(){
 
   if(isAdminPreviewMode){
     return <div className={cx("min-h-screen transition-colors duration-300",bg)}>
-      <div className="max-w-7xl mx-auto px-4 py-5 sm:px-6 sm:py-8 space-y-4">
+      <div className="mobile-compact-preview max-w-7xl mx-auto px-4 py-5 sm:px-6 sm:py-8 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-bold sm:text-2xl">Admin Trip Full-Screen Preview</h1>
           <div className="flex gap-2">
