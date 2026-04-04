@@ -2673,12 +2673,13 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
   const [showForm,setShowForm]=useState(false);
   const [editingExpenseId,setEditingExpenseId]=useState<string|null>(null);
   const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
+  const [formError,setFormError]=useState("");
+  const [editFormError,setEditFormError]=useState("");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const expenseCurrencies=[...new Set(trip.expenses.map(exp=>exp.currency || "USD"))];
-  const [activeCurrency,setActiveCurrency]=useState(expenseCurrencies[0] ?? "USD");
-  const settlement=settlements(trip,profiles,activeCurrency);
-  const myBal=settlement.bal.find(b=>b.id===user.id);
+  const settlementByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlements(trip,profiles,currency)]));
+  const myBalByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlementByCurrency[currency].bal.find(b=>b.id===user.id)]));
   const totalsByCurrency = trip.expenses.reduce<Record<string, number>>((acc,expense)=>{
     const cur = expense.currency || "USD";
     acc[cur] = (acc[cur] ?? 0) + expense.amount;
@@ -2696,7 +2697,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     const included = form.participants.length?form.participants:members.map(m=>m.id);
     const payload = {...form,participants:included,customSplits:form.splitType==="custom"?form.customSplits:{}};
     const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
-    if(form.splitType==="custom" && Math.abs(customTotal-form.amount)>0.01) return;
+    if(form.splitType==="custom" && Math.abs(customTotal-form.amount)>0.01){
+      setFormError(`Custom split total (${fmtCur(customTotal,form.currency)}) must equal amount (${fmtCur(form.amount,form.currency)}).`);
+      return;
+    }
+    setFormError("");
     onAdd(trip.id,payload);
     setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:"",splitType:"equal",customSplits:{}});
     setShowForm(false);
@@ -2722,7 +2727,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     const included = editForm.participants.length?editForm.participants:members.map(m=>m.id);
     const payload = {...editForm,participants:included,customSplits:editForm.splitType==="custom"?editForm.customSplits:{}};
     const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
-    if(editForm.splitType==="custom" && Math.abs(customTotal-editForm.amount)>0.01) return;
+    if(editForm.splitType==="custom" && Math.abs(customTotal-editForm.amount)>0.01){
+      setEditFormError(`Custom split total (${fmtCur(customTotal,editForm.currency)}) must equal amount (${fmtCur(editForm.amount,editForm.currency)}).`);
+      return;
+    }
+    setEditFormError("");
     onUpdateExpense(trip.id,editingExpenseId,payload);
     setEditingExpenseId(null);
   };
@@ -2737,26 +2746,21 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("joinersCanEditExpenses")}</p>}
 
         {/* Balance Summary */}
-        {myBal&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
+        {expenseCurrencies.length>0&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
           <h3 className="text-xl font-bold mb-4">{t("balanceSummary")}</h3>
-          {expenseCurrencies.length>1&&<Select th={th} label={t("currency")} value={activeCurrency} onChange={e=>setActiveCurrency(e.target.value)}>
-            {expenseCurrencies.map(currency=><option key={currency} value={currency}>{currency}</option>)}
-          </Select>}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("totalPaid")}</p>
-              <p className="text-2xl font-bold text-emerald-400">{fmtCur(myBal.paid,activeCurrency)}</p>
-            </div>
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("myShare")}</p>
-              <p className="text-2xl font-bold text-amber-400">{fmtCur(myBal.share,activeCurrency)}</p>
-            </div>
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("iOwe")}</p>
-              <p className={cx("text-2xl font-bold",myBal.net<0?"text-rose-400":"text-cyan-400")}>
-                {myBal.net<0?fmtCur(Math.abs(myBal.net),activeCurrency):"—"}
-              </p>
-            </div>
+          <div className="space-y-3">
+            {expenseCurrencies.map(currency=>{
+              const myBal=myBalByCurrency[currency];
+              if(!myBal) return null;
+              return <div key={currency} className={cx("rounded-2xl border p-3",th==="dark"?"border-white/10 bg-white/[0.04]":"border-slate-200 bg-white")}>
+                <p className={cx("text-xs mb-2",th==="dark"?"text-slate-400":"text-slate-500")}>{currency}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <p>{t("totalPaid")}: <span className="font-bold text-emerald-400">{fmtCur(myBal.paid,currency)}</span></p>
+                  <p>{t("myShare")}: <span className="font-bold text-amber-400">{fmtCur(myBal.share,currency)}</span></p>
+                  <p>{t("iOwe")}: <span className={cx("font-bold",myBal.net<0?"text-rose-400":"text-cyan-400")}>{myBal.net<0?fmtCur(Math.abs(myBal.net),currency):"—"}</span></p>
+                </div>
+              </div>;
+            })}
           </div>
           <p className={cx("mt-3 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
             Totals: {Object.entries(totalsByCurrency).map(([currency,total])=>fmtCur(total,currency)).join(" · ")}
@@ -2764,8 +2768,10 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         </Card>}
 
         {trip.expenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
-        :<div className="space-y-3">
-          {trip.expenses.filter(exp=>exp.currency===activeCurrency).map(exp=>{
+        :<div className="space-y-5">
+          {expenseCurrencies.map(currency=><div key={currency} className="space-y-3">
+            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+            {trip.expenses.filter(exp=>exp.currency===currency).map(exp=>{
             const payer=members.find(m=>m.id===exp.paidBy);
             return <Card key={exp.id} th={th} className="p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
@@ -2793,16 +2799,20 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
                 </div>
               </div>
             </Card>;
-          })}
+            })}
+          </div>)}
         </div>}
       </Card>
 
-      {settlement.sett.length>0&&<Card th={th} className="p-5 sm:p-8">
+      {expenseCurrencies.some(currency=>settlementByCurrency[currency].sett.length>0)&&<Card th={th} className="p-5 sm:p-8">
         <h3 className="text-xl font-bold mb-4">{t("settlements")}</h3>
-        <div className="space-y-2">
-          {settlement.sett.map((s,i)=><p key={i} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
-            <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,activeCurrency)}</span>
-          </p>)}
+        <div className="space-y-4">
+          {expenseCurrencies.map(currency=>settlementByCurrency[currency].sett.length>0&&<div key={currency} className="space-y-2">
+            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+            {settlementByCurrency[currency].sett.map((s,i)=><p key={`${currency}-${i}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
+              <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,currency)}</span>
+            </p>)}
+          </div>)}
         </div>
       </Card>}
     </div>
@@ -2849,6 +2859,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
             </div>}
         </div>
         <Textarea th={th} label={t("expNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
+        {formError&&<p className="text-sm text-rose-400">{formError}</p>}
         <Btn th={th} type="submit">{t("add")}</Btn>
       </form>
     </Modal>
@@ -2894,6 +2905,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
             </div>}
         </div>
         <Textarea th={th} label={t("expNotes")} value={editForm.notes} onChange={e=>setEditForm(f=>({...f,notes:e.target.value}))}/>
+        {editFormError&&<p className="text-sm text-rose-400">{editFormError}</p>}
         <Btn th={th} type="submit">{t("save")}</Btn>
       </form>
     </Modal>
@@ -3433,9 +3445,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
         {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
-          <div className="flex gap-2">
-            <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="flex-1"/>
-            <Btn th={th} v="sec" type="button" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("search")}</Btn>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="w-full"/>
+            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):`🔎 ${t("search")}`}</Btn>
           </div>
           {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
             <option value="">Select location</option>
