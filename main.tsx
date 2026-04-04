@@ -1344,15 +1344,18 @@ function Tabs<T extends string>({tabs,active,onChange,th}:{tabs:{id:T;label:stri
   </div>;
 }
 
-function Modal({open,onClose,th,children,title}:{open:boolean;onClose:()=>void;th:ThemeMode;children:ReactNode;title?:string}){
+function Modal({open,onClose,th,children,title,size="md",mobileFullscreen=false}:{open:boolean;onClose:()=>void;th:ThemeMode;children:ReactNode;title?:string;size?:"md"|"xl"|"full";mobileFullscreen?:boolean;}){
   if(!open)return null;
+  const widthClass=size==="full"?"max-w-6xl":size==="xl"?"max-w-4xl":"max-w-lg";
   return <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"/>
     <motion.div initial={{opacity:0,scale:.96}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:.96}}
-      className={cx("relative z-10 w-full max-w-lg rounded-3xl border p-8 shadow-2xl max-h-[90vh] overflow-y-auto",
+      className={cx("relative z-10 w-full border p-5 shadow-2xl overflow-y-auto sm:p-8",
+        widthClass,
+        mobileFullscreen?"h-[100dvh] rounded-none sm:h-auto sm:max-h-[90vh] sm:rounded-3xl":"max-h-[90vh] rounded-3xl",
         th==="dark"?"border-white/10 bg-slate-900":"border-slate-200 bg-white")}
       onClick={e=>e.stopPropagation()}>
-      {title&&<div className="flex items-center justify-between mb-6">
+      {title&&<div className="mb-4 flex items-center justify-between sm:mb-6">
         <h2 className="text-xl font-bold">{title}</h2>
         <button onClick={onClose} className="opacity-60 hover:opacity-100 text-2xl">✕</button>
       </div>}
@@ -1778,19 +1781,19 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     </div>
 
     {/* TRIP HEADER */}
-    <div className="relative rounded-3xl overflow-hidden" style={{minHeight:"280px"}}>
+    <div className="relative overflow-hidden rounded-3xl" style={{minHeight:"280px"}}>
       <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-600" style={{background:trip.bannerImage?`url(${trip.bannerImage}) center/cover`:trip.bannerColor}}/>
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"/>
-      <div className="relative z-10 p-10 text-white">
+      <div className="relative z-10 p-5 text-white sm:p-10">
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <Badge label={`${t("status")}: ${t(status)}`} th={th} color={getStatusColor(status)}/>
-          <button onClick={()=>{copyText(trip.id);}} className="flex items-center gap-2 rounded-full bg-white/20 px-4 py-2 transition hover:bg-white/30">
+          <button onClick={()=>{copyText(trip.id);}} className="flex items-center gap-2 rounded-full bg-white/20 px-3 py-2 text-sm transition hover:bg-white/30 sm:px-4 sm:text-base">
             📋 {trip.id} <span className="text-sm opacity-75">({t("copyId")})</span>
           </button>
         </div>
-        <h1 className="text-5xl font-black mb-3">{trip.title}</h1>
-        <p className="text-2xl mb-6">📍 {trip.location}</p>
-        <div className="flex flex-wrap gap-4 text-lg">
+        <h1 className="mb-3 text-3xl font-black sm:text-5xl">{trip.title}</h1>
+        <p className="mb-6 text-lg sm:text-2xl">📍 {trip.location}</p>
+        <div className="flex flex-wrap gap-3 text-sm sm:gap-4 sm:text-lg">
           <span>📅 {fmtDate(trip.startDate)} – {fmtDate(trip.endDate)}</span>
           <span>⏱️ {trip.duration} {t("days")}</span>
           <span>👥 {trip.members.length} {t("members")}</span>
@@ -3186,8 +3189,8 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete}:{trips:Trip[];profile
   return <div className="space-y-3">
     <p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{trips.length} {t("adminTrips")}</p>
     {trips.length===0?<Empty icon="✈️" title={t("noTrips")} desc="" th={th}/>
-    :trips.map(tr=><Card key={tr.id} th={th} className="p-6">
-      <div className="flex items-start justify-between gap-4">
+    :trips.map(tr=><Card key={tr.id} th={th} className="p-4 sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="font-semibold text-lg">{tr.title}</p>
           <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
@@ -3195,13 +3198,13 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete}:{trips:Trip[];profile
           </p>
           <p className={cx("text-sm mt-0.5",th==="dark"?"text-slate-500":"text-slate-400")}>ID: {tr.id} · {t("owner")}: {tr.ownerName}</p>
         </div>
-        <div className="flex gap-2">
-          <Btn th={th} v="sec" sz="sm" onClick={()=>setPreviewTrip(tr)}>{t("overview")}</Btn>
-          <Btn th={th} v="danger" sz="sm" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <Btn th={th} v="sec" sz="sm" className="w-full sm:w-auto" onClick={()=>setPreviewTrip(tr)}>{t("overview")}</Btn>
+          <Btn th={th} v="danger" sz="sm" className="w-full sm:w-auto" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
         </div>
       </div>
     </Card>)}
-    <Modal open={Boolean(previewTrip)} onClose={()=>setPreviewTrip(null)} th={th} title={previewTrip?.title}>
+    <Modal open={Boolean(previewTrip)} onClose={()=>setPreviewTrip(null)} th={th} title={previewTrip?.title} size="full" mobileFullscreen>
       {previewTrip&&<TripDetail
         trip={previewTrip}
         user={previewUser}
