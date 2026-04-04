@@ -3117,12 +3117,13 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
 /* ═══════════════════════════════════════════════════════════════════════════════
    ADMIN
    ═══════════════════════════════════════════════════════════════════════════════ */
-function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdminAuth,siteCfg,setSiteCfg,onDeleteTrip,onDeleteTraveler,onRefreshSync}:{
+function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdminAuth,siteCfg,setSiteCfg,onDeleteTrip,onDeleteTraveler,onRefreshSync,onOpenPreviewWindow}:{
   profiles:Profile[];trips:Trip[];th:ThemeMode;t:(k:TKey)=>string;
   adminPw:string;adminAuth:boolean;setAdminPw:(v:string)=>void;setAdminAuth:(v:boolean)=>void;
   siteCfg:SiteSettings;setSiteCfg:(v:SiteSettings)=>void;
   onDeleteTrip:(id:string)=>void;onDeleteTraveler:(id:string)=>void;
   onRefreshSync?:()=>Promise<void>|void;
+  onOpenPreviewWindow:(tripId:string)=>void;
 }){
   const [tab,setTab]=useState<AdminTab>("trips");
   const [loginPw,setLoginPw]=useState("");
@@ -3164,7 +3165,7 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
     </div>
     <Tabs tabs={adminTabs} active={tab} onChange={setTab} th={th}/>
 
-    {tab==="trips"&&<AdminTrips trips={trips} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onDelete={onDeleteTrip}/>}
+    {tab==="trips"&&<AdminTrips trips={trips} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onDelete={onDeleteTrip} onOpenPreviewWindow={onOpenPreviewWindow}/>}
     {tab==="travelers"&&<AdminTravelers profiles={profiles} trips={trips} th={th} t={t} onDelete={onDeleteTraveler}/>}
     {tab==="luggage"&&<AdminLuggageCfg th={th} t={t} settings={siteCfg} onSave={setSiteCfg}/>}
     {tab==="website"&&<div className="space-y-6">
@@ -3175,7 +3176,7 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
   </div>;
 }
 
-function AdminTrips({trips,profiles,siteCfg,th,t,onDelete}:{trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void}){
+function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void;onOpenPreviewWindow:(tripId:string)=>void;}){
   const [previewTrip,setPreviewTrip]=useState<Trip|null>(null);
   const previewUser = useMemo<Profile>(()=>({
     id:"admin-preview-viewer",
@@ -3200,6 +3201,7 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete}:{trips:Trip[];profile
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Btn th={th} v="sec" sz="sm" className="w-full sm:w-auto" onClick={()=>setPreviewTrip(tr)}>{t("overview")}</Btn>
+          <Btn th={th} v="ghost" sz="sm" className="w-full sm:w-auto" onClick={()=>onOpenPreviewWindow(tr.id)}>Open Full Screen</Btn>
           <Btn th={th} v="danger" sz="sm" className="w-full sm:w-auto" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
         </div>
       </div>
@@ -3544,6 +3546,10 @@ export function App(){
   const [authMode,setAuthMode]=useState<"signin"|"signup">("signin");
   const [showAuth,setShowAuth]=useState(false);
   const [manualSyncing,setManualSyncing]=useState(false);
+  const adminPreviewTripId = useMemo(()=>{
+    if(typeof window==="undefined") return "";
+    return (new URLSearchParams(window.location.search).get("adminPreviewTrip") ?? "").trim().toUpperCase();
+  },[]);
 
   const t=useT(lang);
 
@@ -3564,6 +3570,22 @@ export function App(){
   },[adminPwMeta,profilesMeta,siteCfgMeta,tripsMeta]);
 
   const user=useMemo(()=>profiles.find(p=>p.id===userId),[userId,profiles]);
+  const previewTrip = useMemo(()=>trips.find(tr=>tr.id===adminPreviewTripId)||null,[trips,adminPreviewTripId]);
+  const isAdminPreviewMode = Boolean(adminPreviewTripId);
+  const previewUser = useMemo<Profile>(()=>({
+    id:"admin-preview-viewer",
+    accountName:"ADMINP0000",
+    firstName:"Admin",
+    lastName:"Preview",
+    email:"preview@local",
+    phone:"",
+    password:"",
+  }),[]);
+  const openAdminPreviewWindow=(tripId:string)=>{
+    const nextUrl=new URL(window.location.href);
+    nextUrl.searchParams.set("adminPreviewTrip",tripId);
+    window.open(nextUrl.toString(),"_blank","noopener,noreferrer");
+  };
 
   const handleSignIn=(ident:string,pw:string)=>{
     if(!sharedSyncReady)return{ok:false,message:"Shared account data is still syncing. Please wait a moment and try again."};
@@ -3657,6 +3679,41 @@ export function App(){
   const bg=theme==="dark"?"bg-slate-950 text-white":"bg-[#cdd0d8] text-slate-900";
   const showLanding=!user&&view==="user";
 
+  if(isAdminPreviewMode){
+    return <div className={cx("min-h-screen transition-colors duration-300",bg)}>
+      <div className="max-w-7xl mx-auto px-4 py-5 sm:px-6 sm:py-8 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-bold sm:text-2xl">Admin Trip Full-Screen Preview</h1>
+          <div className="flex gap-2">
+            <Btn th={theme} v="ghost" sz="sm" onClick={()=>window.close()}>Close Window</Btn>
+          </div>
+        </div>
+        {!sharedSyncReady?<Card th={theme} className="p-6">Loading trip preview…</Card>
+        :!previewTrip?<Card th={theme} className="p-6">Trip not found. This trip may have been removed.</Card>
+        :<TripDetail
+          trip={previewTrip}
+          user={previewUser}
+          profiles={profiles}
+          siteCfg={siteCfg}
+          th={theme}
+          t={t}
+          onBack={()=>window.close()}
+          onUpdate={()=>{}}
+          onDeleteTrip={()=>{}}
+          onAddExp={()=>{}}
+          onAddPack={()=>{}}
+          onTogglePack={()=>{}}
+          onRemovePack={()=>{}}
+          onAddSharedPack={()=>{}}
+          onRemoveSharedPack={()=>{}}
+          onUpdateItin={()=>{}}
+          onRemoveExp={()=>{}}
+          readOnly
+        />}
+      </div>
+    </div>;
+  }
+
   return <div className={cx("min-h-screen transition-colors duration-300",bg)}>
     {showLanding&&<>
       <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4">
@@ -3706,7 +3763,7 @@ export function App(){
         : <AdminWorkspace profiles={profiles} trips={trips} th={theme} t={t}
             adminPw={adminPw} adminAuth={adminAuth} setAdminPw={setAdminPw} setAdminAuth={setAdminAuth}
             siteCfg={siteCfg} setSiteCfg={setSiteCfg} onDeleteTrip={deleteTrip} onDeleteTraveler={deleteTraveler}
-            onRefreshSync={refreshSharedSync}/>
+            onRefreshSync={refreshSharedSync} onOpenPreviewWindow={openAdminPreviewWindow}/>
     )}
 
     {view==="user"&&user&&<UserWorkspace user={user} trips={trips} profiles={profiles} siteCfg={siteCfg} th={theme} t={t}
