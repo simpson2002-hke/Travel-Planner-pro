@@ -30,10 +30,13 @@ type TravelNote = {
 type Expense = {
   id: string; date: string; title: string; amount: number; currency: string;
   category: string; paidBy: string; participants: string[]; notes: string;
+  splitType?: "equal" | "custom";
+  customSplits?: Record<string, number>;
 };
 
 type PackingItem = {
-  id: string; label: string; category: string; assignedTo: string; packed: boolean;
+  id: string; label: string; category: string; assignedTo: string; packed?: boolean;
+  packedBy?: Record<string, boolean>;
   isSharedDefault?: boolean; createdById?: string;
 };
 
@@ -55,6 +58,8 @@ type TransitLeg = { duration: string; details: string; };
 type ItineraryItem = {
   id: string; day: number; order: number; startTime: string; endTime: string; endDayOffset?: number; title: string; stopLocation: string; transport: string; details: string;
   photo?: string; mapUrl?: string; transitToNext?: TransitLeg; activityType?: "regular" | "free-time";
+  freeTimeOwnerId?: string;
+  freeTimeParticipantIds?: string[];
 };
 
 type OptionalStop = {
@@ -67,7 +72,7 @@ type FreeTimeEntry = {
   editorId: string; participantIds: string[]; pendingJoinIds: string[]; notes: string;
 };
 
-type TripRole = "owner" | "co-owner" | "joiner";
+type TripRole = "owner" | "editor" | "viewer";
 
 type Trip = {
   id: string; ownerId: string; ownerName: string; title: string; location: string;
@@ -180,10 +185,10 @@ const normalizeName = (v:string)=>upper(v);
 const normalizeAirport = (v:string)=>upper(v).slice(0,3);
 const getTripRole = (trip:Trip,userId:string):TripRole=>{
   const roles = trip.memberRoles ?? {};
-  return roles[userId] ?? (userId===trip.ownerId?"owner":"joiner");
+  return roles[userId] ?? (userId===trip.ownerId?"owner":"viewer");
 };
-const canEditSettings = (role:TripRole)=>role==="owner"||role==="co-owner";
-const canEditItinerary = (role:TripRole)=>role==="owner"||role==="co-owner";
+const canEditSettings = (role:TripRole)=>role==="owner"||role==="editor";
+const canEditItinerary = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditExpenses = (_role:TripRole)=>true;
 
 function calcDuration(s:string,e:string){
@@ -698,7 +703,13 @@ function normTrip(i:unknown):Trip{
   const rawRoles = (t.memberRoles && typeof t.memberRoles==="object" ? t.memberRoles : {}) as Record<string, TripRole>;
   const memberRoles = members.reduce<Record<string, TripRole>>((acc,memberId)=>{
     const existing = rawRoles[memberId];
-    acc[memberId] = existing==="owner"||existing==="co-owner"||existing==="joiner" ? existing : (memberId===t.ownerId ? "owner" : "joiner");
+    acc[memberId] = existing==="owner"||existing==="editor"||existing==="viewer"
+      ? existing
+      : existing==="co-owner"
+        ? "editor"
+        : existing==="joiner"
+          ? "viewer"
+          : (memberId===t.ownerId ? "owner" : "viewer");
     return acc;
   },{});
   if(t.ownerId && memberRoles[t.ownerId] !== "owner"){
@@ -738,6 +749,8 @@ function normTrip(i:unknown):Trip{
       paidBy: expense.paidBy ?? "",
       participants: Array.isArray(expense.participants) ? expense.participants : [],
       notes: expense.notes ?? "",
+      splitType: expense.splitType === "custom" ? "custom" : "equal",
+      customSplits: expense.customSplits && typeof expense.customSplits === "object" ? expense.customSplits : {},
     })):[],
     itineraryChecklists,
     packingList:Array.isArray(t.packingList)?t.packingList.map((item,index)=>({
@@ -745,7 +758,10 @@ function normTrip(i:unknown):Trip{
       label: item.label ?? "",
       category: item.category ?? "General",
       assignedTo: item.assignedTo ?? "",
-      packed: Boolean(item.packed),
+      packed: item.packed !== undefined ? Boolean(item.packed) : undefined,
+      packedBy: item.packedBy && typeof item.packedBy === "object"
+        ? item.packedBy
+        : (item.packed !== undefined ? {"legacy":Boolean(item.packed)} : {}),
       isSharedDefault: Boolean(item.isSharedDefault),
       createdById: item.createdById ?? "",
     })):[],
@@ -760,6 +776,8 @@ function normTrip(i:unknown):Trip{
       mapUrl: (item as ItineraryItem).mapUrl ?? "",
       transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" },
       activityType: (item as ItineraryItem).activityType ?? ((item as ItineraryItem).transport === "Free Time" ? "free-time" : "regular"),
+      freeTimeOwnerId: (item as ItineraryItem).freeTimeOwnerId ?? "",
+      freeTimeParticipantIds: Array.isArray((item as ItineraryItem).freeTimeParticipantIds) ? (item as ItineraryItem).freeTimeParticipantIds : [],
     })),
     optionalStops: Array.isArray((t as Partial<Trip>).optionalStops) ? (t as Partial<Trip>).optionalStops!.map((stop, index) => ({
       id: stop.id ?? uid(`opt-${index}`), day: typeof stop.day === "number" ? stop.day : 1,
@@ -812,22 +830,30 @@ function normSite(i:unknown):SiteSettings{
   };
 }
 
-function settlements(trip:Trip,profiles:Profile[]){
+function settlements(trip:Trip,profiles:Profile[],currency?:string){
   const mems=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const led=new Map<string,{name:string;paid:number;share:number}>();
   for(const m of mems) led.set(m.id,{name:dn(m),paid:0,share:0});
-  for(const e of trip.expenses){
+  const expenses = currency ? trip.expenses.filter(exp=>exp.currency===currency) : trip.expenses;
+  for(const e of expenses){
     const payer=led.get(e.paidBy); if(payer) payer.paid+=e.amount;
     const inc=e.participants.length?e.participants:mems.map(m=>m.id);
-    const each=e.amount/(inc.length||1);
-    for(const pid of inc){const x=led.get(pid);if(x) x.share+=each;}
+    if(e.splitType==="custom" && e.customSplits){
+      for(const pid of inc){
+        const x=led.get(pid);
+        if(x) x.share += Number(e.customSplits[pid] ?? 0);
+      }
+    }else{
+      const each=e.amount/(inc.length||1);
+      for(const pid of inc){const x=led.get(pid);if(x) x.share+=each;}
+    }
   }
   const bal=[...led.entries()].map(([id,r])=>({id,name:r.name,paid:r.paid,share:r.share,net:+(r.paid-r.share).toFixed(2)}));
   const cred=bal.filter(b=>b.net>0.01).map(b=>({...b})).sort((a,b)=>b.net-a.net);
   const debt=bal.filter(b=>b.net<-0.01).map(b=>({...b,debt:Math.abs(b.net)})).sort((a,b)=>b.debt-a.debt);
   const sett:{from:string;to:string;amount:number}[]=[];
   for(const d of debt){let rem=d.debt;for(const c of cred){if(rem<=0.01||c.net<=0.01)continue;const a=Math.min(rem,c.net);sett.push({from:d.name,to:c.name,amount:+a.toFixed(2)});rem-=a;c.net-=a;}}
-  return {total:trip.expenses.reduce((s,e)=>s+e.amount,0),bal,sett};
+  return {total:expenses.reduce((s,e)=>s+e.amount,0),bal,sett};
 }
 
 function tripFlightSummary(trip:Trip){
@@ -869,7 +895,11 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string){
     items: trip.itinerary.filter(item=>item.day===day).sort((a,b)=>a.order-b.order),
     optionalStops: trip.optionalStops.filter(stop=>stop.day===day),
   }));
-  const expensesTotal = trip.expenses.reduce((sum, expense)=>sum + expense.amount, 0);
+  const expenseTotalsByCurrency = trip.expenses.reduce<Record<string, number>>((acc, expense)=>{
+    const currency = expense.currency || "USD";
+    acc[currency] = (acc[currency] ?? 0) + expense.amount;
+    return acc;
+  }, {});
   const html = `<!doctype html>
 <html>
   <head>
@@ -996,7 +1026,9 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     <section class="section">
       <h2 class="section-title">${escapeHtml(t("expenses"))}</h2>
       <div class="grid cols-2">
-        <div class="tile"><div class="label">${escapeHtml(t("totalSpent"))}</div><div class="value">${escapeHtml(fmtCur(expensesTotal, trip.expenses[0]?.currency || "USD"))}</div></div>
+        <div class="tile"><div class="label">${escapeHtml(t("totalSpent"))}</div><div class="value">${Object.keys(expenseTotalsByCurrency).length
+          ? escapeHtml(Object.entries(expenseTotalsByCurrency).map(([currency,total])=>fmtCur(total,currency)).join(" · "))
+          : "—"}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("members"))}</div><div class="value">${escapeHtml(String(trip.members.length))}</div></div>
       </div>
       ${trip.expenses.length ? pdfList(trip.expenses.map(expense=>`${fmtDate(expense.date)} • ${expense.title} • ${fmtCur(expense.amount, expense.currency)} • ${expense.category}`)) : `<p class="muted" style="margin-top:12px">${escapeHtml(t("noExpensesDesc"))}</p>`}
@@ -1004,7 +1036,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
 
     <section class="section">
       <h2 class="section-title">${escapeHtml(t("luggage"))}</h2>
-      ${trip.packingList.length ? pdfList(trip.packingList.map(item=>`${item.label} (${item.category})${item.packed ? " ✓" : ""}`)) : `<p class="muted">${escapeHtml(t("noLuggageDesc"))}</p>`}
+      ${trip.packingList.length ? pdfList(trip.packingList.map(item=>`${item.label} (${item.category})${Object.values(item.packedBy ?? {}).some(Boolean) ? " ✓" : ""}`)) : `<p class="muted">${escapeHtml(t("noLuggageDesc"))}</p>`}
     </section>
   </body>
 </html>`;
@@ -1598,10 +1630,11 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
 /* ═══════════════════════════════════════════════════════════════════════════════
    USER WORKSPACE
    ═══════════════════════════════════════════════════════════════════════════════ */
-function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoin,onTripUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp}:{
+function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoin,onLeaveTrip,onTripUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp}:{
   user:Profile;trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;
   onUpdate:(d:Partial<Profile>)=>void;onCreate:(d:{title:string;location:string;startDate:string;endDate:string})=>void;
   onJoin:(code:string)=>{ok:boolean;message:string};onTripUpdate:(id:string,d:Partial<Trip>)=>void;
+  onLeaveTrip:(tripId:string)=>void;
   onDeleteTrip:(id:string)=>void;
   onAddExp:(tid:string,e:Omit<Expense,"id">)=>void;onAddPack:(tid:string,l:string,cat:string)=>void;
   onUpdateExp:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;
@@ -1626,7 +1659,7 @@ function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoi
       :<TripDetail trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onBack={()=>setActiveTrip(null)}
         onUpdate={onTripUpdate} onDeleteTrip={onDeleteTrip} onAddExp={onAddExp} onAddPack={onAddPack} onTogglePack={onTogglePack} onRemovePack={onRemovePack}
         onAddSharedPack={onAddSharedPack} onRemoveSharedPack={onRemoveSharedPack}
-        onUpdateItin={onUpdateItin} onRemoveExp={onRemoveExp} onUpdateExp={onUpdateExp}/>}
+        onUpdateItin={onUpdateItin} onRemoveExp={onRemoveExp} onUpdateExp={onUpdateExp} onLeaveTrip={onLeaveTrip}/>}
     </>}
   </div>;
 }
@@ -1815,7 +1848,7 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
   </Card>;
 }
 
-function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp,readOnly=false}:{
+function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp,onLeaveTrip,readOnly=false}:{
   trip:Trip;user:Profile;profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onBack:()=>void;
   onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onAddExp:(tid:string,e:Omit<Expense,"id">)=>void;
   onUpdateExp:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;
@@ -1823,6 +1856,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
   onAddSharedPack:(tid:string,l:string,cat:string)=>void;onRemoveSharedPack:(tid:string,iid:string)=>void;
   onRemovePack:(tid:string,iid:string)=>void;onUpdateItin:(tid:string,items:ItineraryItem[])=>void;
   onRemoveExp:(tid:string,eid:string)=>void;
+  onLeaveTrip:(tripId:string)=>void;
   readOnly?: boolean;
 }){
   const [tab,setTab]=useState<TripTab>("overview");
@@ -1876,10 +1910,10 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
 
     {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} canEdit={!readOnly} th={th} t={t} onUpdate={onUpdate}/>} 
     {tab==="travelers"&&<TripTravelers trip={trip} user={user} profiles={profiles} th={th} t={t} onUpdateTrip={onUpdate}/>} 
-    {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
+    {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} canEditFreeTime={!readOnly} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
     {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onUpdateExpense={onUpdateExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} user={user} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack} onAddShared={onAddSharedPack} onRemoveShared={onRemoveSharedPack}/>}
-    {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack}/>}
+    {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
   </div>;
 }
 
@@ -2303,13 +2337,13 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
             </div>
           </div>
-          <Badge label={role} th={th} color={role==="owner"?"amber":role==="co-owner"?"green":"blue"}/>
+          <Badge label={role} th={th} color={role==="owner"?"amber":role==="editor"?"green":"blue"}/>
         </div>
 
         {isOwner&&member.id!==trip.ownerId&&<div>
           <p className={cx("text-xs mb-2",th==="dark"?"text-slate-400":"text-slate-500")}>Role</p>
           <div className="flex gap-2 flex-wrap">
-            {(["co-owner","joiner"] as TripRole[]).map(roleOption=><button key={roleOption} type="button" onClick={()=>setRole(member.id,roleOption)}
+            {(["editor","viewer"] as TripRole[]).map(roleOption=><button key={roleOption} type="button" onClick={()=>setRole(member.id,roleOption)}
               className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
                 role===roleOption
                   ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
@@ -2350,8 +2384,8 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   </div>;
 }
 
-function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1};
+function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;canEditFreeTime:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,freeTimeParticipantIds:[] as string[]};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
     { value:"transport", label:t("transport") },
@@ -2365,6 +2399,9 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const [optionalForm,setOptionalForm]=useState(emptyOptionalForm);
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
+  const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
+    ? (canEdit || item.freeTimeOwnerId===user.id)
+    : canEdit;
 
   const dayItems=trip.itinerary.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
   const optionalDayItems=trip.optionalStops.filter(stop=>stop.day===day);
@@ -2375,7 +2412,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
 
   const saveActivity=async(e:React.FormEvent)=>{
     e.preventDefault();
-    if(!canEdit) return;
+    if(!(canEdit || (form.activityType==="free-time" && canEditFreeTime))) return;
     if(!form.title.trim())return;
     const transportLabel = form.activityType==="transport" ? "Transport" : form.activityType==="free-time" ? "Free Time" : "Activity";
     const payload={
@@ -2389,6 +2426,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
       photo:form.photo,
       mapUrl:form.mapUrl||googleMapEmbedUrl(form.stopLocation),
       activityType:form.activityType,
+      freeTimeOwnerId: form.activityType==="free-time" ? (editId ? trip.itinerary.find(it=>it.id===editId)?.freeTimeOwnerId || user.id : user.id) : "",
+      freeTimeParticipantIds: form.activityType==="free-time" ? form.freeTimeParticipantIds : [],
     };
     const next=editId
       ? trip.itinerary.map(it=>it.id===editId?{...it,...payload,day}:it)
@@ -2410,7 +2449,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   };
 
   const remove=async(id:string)=>{
-    if(!canEdit) return;
+    const target = trip.itinerary.find(it=>it.id===id);
+    if(!canManageItem(target)) return;
     const remaining=trip.itinerary.filter(it=>it.id!==id);
     const remainingDay=remaining.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
     const orderMap=new Map(remainingDay.map((item,index)=>[item.id,index+1]));
@@ -2420,7 +2460,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
 
   const edit=(it:ItineraryItem)=>{
     const mode=((it.startTime==="00:00"||it.startTime==="00:00:00")&&(it.endTime==="23:59"||it.endTime==="23:59:00"))?"whole-day":"timed";
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1 });
+    if(!canManageItem(it)) return;
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1,freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2457,6 +2498,9 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   const removeOptionalStop=(id:string)=>onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(stop=>stop.id!==id)});
   const profileMap = new Map(profiles.map(profile=>[profile.id,profile]));
   const splitTimeline = dayItems
+    .filter(item=>item.activityType!=="free-time"
+      || item.freeTimeOwnerId===travelerView
+      || (item.freeTimeParticipantIds ?? []).includes(travelerView))
     .map(item=>({ sortTime:item.startTime || "23:59", item }))
     .sort((a,b)=>a.sortTime.localeCompare(b.sortTime));
 
@@ -2509,7 +2553,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
                 {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="mt-3 h-40 w-full rounded-2xl border border-white/10"/>}
                 {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-32 w-full rounded-2xl border border-white/10 object-cover"/>}
               </div>
-              <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
+              <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>}
@@ -2539,7 +2583,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
     </div>
 
     <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
-      {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Only owner/co-owner can edit itinerary details.</p>}
+      {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Only owner/editor can edit shared itinerary details. You can still manage your own free-time plans.</p>}
       <div className="mb-4">
         <h3 className="text-xl font-bold">{activePane==="schedule" ? (editId?t("edit"):t("addActivity")) : (optionalEditId?t("editOptionalPlace"):t("addOptionalPlace"))}</h3>
         <p className={cx("mt-2 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{activePane==="schedule" ? t("noItineraryDesc") : t("optionalPlacesDesc")}</p>
@@ -2553,16 +2597,32 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
           onChange={e=>{
             const mode=e.target.value;
             if(mode==="free-time"){
-              setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:""}));
+              setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:"",freeTimeParticipantIds:f.freeTimeParticipantIds??[]}));
             }else if(mode==="transport"){
-              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport")}));
+              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport"),freeTimeParticipantIds:[]}));
             }else{
-              setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title}));
+              setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title,freeTimeParticipantIds:[]}));
             }
           }}
         >
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
+        {form.activityType==="free-time"&&<div>
+          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>Invite travelers</p>
+          <div className="flex flex-wrap gap-2">
+            {trip.members.filter(memberId=>memberId!==user.id).map(memberId=>{
+              const traveler=profileMap.get(memberId);
+              const selected=form.freeTimeParticipantIds.includes(memberId);
+              return <button key={memberId} type="button" onClick={()=>setForm(f=>({...f,freeTimeParticipantIds:selected?f.freeTimeParticipantIds.filter(id=>id!==memberId):[...f.freeTimeParticipantIds,memberId]}))}
+                className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
+                  selected
+                    ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
+                    :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
+                {traveler?dn(traveler):memberId}
+              </button>;
+            })}
+          </div>
+        </div>}
         <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
         <Select th={th} label={t("timeMode")} value={form.timeMode} onChange={e=>{
           const nextMode=e.target.value as "timed"|"whole-day";
@@ -2588,8 +2648,8 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
           {form.photo&&<img src={form.photo} alt="preview" className="h-24 w-full rounded-2xl border border-white/10 object-cover"/>}
         </div>
         <Textarea th={th} label={t("remarks")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
-        <Btn th={th} type="submit" disabled={!canEdit}>{editId?t("save"):t("add")}</Btn>
-        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!canEdit}>{t("cancel")}</Btn>}
+        <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
+        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
@@ -2609,14 +2669,22 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
 }
 
 function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onRemove}:{trip:Trip;user:Profile;canEdit:boolean;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onUpdateExpense:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
-  const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:""});
+  const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
   const [showForm,setShowForm]=useState(false);
   const [editingExpenseId,setEditingExpenseId]=useState<string|null>(null);
-  const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:""});
+  const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
+  const [formError,setFormError]=useState("");
+  const [editFormError,setEditFormError]=useState("");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
-  const settlement=settlements(trip,profiles);
-  const myBal=settlement.bal.find(b=>b.id===user.id);
+  const expenseCurrencies=[...new Set(trip.expenses.map(exp=>exp.currency || "USD"))];
+  const settlementByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlements(trip,profiles,currency)]));
+  const myBalByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlementByCurrency[currency].bal.find(b=>b.id===user.id)]));
+  const totalsByCurrency = trip.expenses.reduce<Record<string, number>>((acc,expense)=>{
+    const cur = expense.currency || "USD";
+    acc[cur] = (acc[cur] ?? 0) + expense.amount;
+    return acc;
+  },{});
 
   const toggleParticipant=(pid:string)=>{
     setForm(f=>({...f,participants:f.participants.includes(pid)?f.participants.filter(x=>x!==pid):[...f.participants,pid]}));
@@ -2626,8 +2694,16 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     e.preventDefault();
     if(!canEdit) return;
     if(!form.title.trim()||form.amount<=0)return;
-    onAdd(trip.id,{...form,participants:form.participants.length?form.participants:members.map(m=>m.id)});
-    setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:""});
+    const included = form.participants.length?form.participants:members.map(m=>m.id);
+    const payload = {...form,participants:included,customSplits:form.splitType==="custom"?form.customSplits:{}};
+    const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
+    if(form.splitType==="custom" && Math.abs(customTotal-form.amount)>0.01){
+      setFormError(`Custom split total (${fmtCur(customTotal,form.currency)}) must equal amount (${fmtCur(form.amount,form.currency)}).`);
+      return;
+    }
+    setFormError("");
+    onAdd(trip.id,payload);
+    setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:"",splitType:"equal",customSplits:{}});
     setShowForm(false);
   };
 
@@ -2641,13 +2717,22 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     setEditForm({
       date:expense.date,title:expense.title,amount:expense.amount,currency:expense.currency,
       category:expense.category,paidBy:expense.paidBy,participants:[...expense.participants],notes:expense.notes,
+      splitType:expense.splitType==="custom"?"custom":"equal",customSplits:expense.customSplits ?? {},
     });
   };
   const saveEdit=(e:React.FormEvent)=>{
     e.preventDefault();
     if(!editingExpenseId||!canEdit) return;
     if(!editForm.title.trim()||editForm.amount<=0)return;
-    onUpdateExpense(trip.id,editingExpenseId,{...editForm,participants:editForm.participants.length?editForm.participants:members.map(m=>m.id)});
+    const included = editForm.participants.length?editForm.participants:members.map(m=>m.id);
+    const payload = {...editForm,participants:included,customSplits:editForm.splitType==="custom"?editForm.customSplits:{}};
+    const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
+    if(editForm.splitType==="custom" && Math.abs(customTotal-editForm.amount)>0.01){
+      setEditFormError(`Custom split total (${fmtCur(customTotal,editForm.currency)}) must equal amount (${fmtCur(editForm.amount,editForm.currency)}).`);
+      return;
+    }
+    setEditFormError("");
+    onUpdateExpense(trip.id,editingExpenseId,payload);
     setEditingExpenseId(null);
   };
 
@@ -2661,29 +2746,32 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("joinersCanEditExpenses")}</p>}
 
         {/* Balance Summary */}
-        {myBal&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
+        {expenseCurrencies.length>0&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
           <h3 className="text-xl font-bold mb-4">{t("balanceSummary")}</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("totalPaid")}</p>
-              <p className="text-2xl font-bold text-emerald-400">{fmtCur(myBal.paid,trip.expenses[0]?.currency||"USD")}</p>
-            </div>
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("myShare")}</p>
-              <p className="text-2xl font-bold text-amber-400">{fmtCur(myBal.share,trip.expenses[0]?.currency||"USD")}</p>
-            </div>
-            <div>
-              <p className={cx("text-sm mb-1",th==="dark"?"text-slate-400":"text-slate-500")}>{t("iOwe")}</p>
-              <p className={cx("text-2xl font-bold",myBal.net<0?"text-rose-400":"text-cyan-400")}>
-                {myBal.net<0?fmtCur(Math.abs(myBal.net),trip.expenses[0]?.currency||"USD"):"—"}
-              </p>
-            </div>
+          <div className="space-y-3">
+            {expenseCurrencies.map(currency=>{
+              const myBal=myBalByCurrency[currency];
+              if(!myBal) return null;
+              return <div key={currency} className={cx("rounded-2xl border p-3",th==="dark"?"border-white/10 bg-white/[0.04]":"border-slate-200 bg-white")}>
+                <p className={cx("text-xs mb-2",th==="dark"?"text-slate-400":"text-slate-500")}>{currency}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <p>{t("totalPaid")}: <span className="font-bold text-emerald-400">{fmtCur(myBal.paid,currency)}</span></p>
+                  <p>{t("myShare")}: <span className="font-bold text-amber-400">{fmtCur(myBal.share,currency)}</span></p>
+                  <p>{t("iOwe")}: <span className={cx("font-bold",myBal.net<0?"text-rose-400":"text-cyan-400")}>{myBal.net<0?fmtCur(Math.abs(myBal.net),currency):"—"}</span></p>
+                </div>
+              </div>;
+            })}
           </div>
+          <p className={cx("mt-3 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+            Totals: {Object.entries(totalsByCurrency).map(([currency,total])=>fmtCur(total,currency)).join(" · ")}
+          </p>
         </Card>}
 
         {trip.expenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
-        :<div className="space-y-3">
-          {trip.expenses.map(exp=>{
+        :<div className="space-y-5">
+          {expenseCurrencies.map(currency=><div key={currency} className="space-y-3">
+            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+            {trip.expenses.filter(exp=>exp.currency===currency).map(exp=>{
             const payer=members.find(m=>m.id===exp.paidBy);
             return <Card key={exp.id} th={th} className="p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
@@ -2711,16 +2799,20 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
                 </div>
               </div>
             </Card>;
-          })}
+            })}
+          </div>)}
         </div>}
       </Card>
 
-      {settlement.sett.length>0&&<Card th={th} className="p-5 sm:p-8">
+      {expenseCurrencies.some(currency=>settlementByCurrency[currency].sett.length>0)&&<Card th={th} className="p-5 sm:p-8">
         <h3 className="text-xl font-bold mb-4">{t("settlements")}</h3>
-        <div className="space-y-2">
-          {settlement.sett.map((s,i)=><p key={i} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
-            <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,trip.expenses[0]?.currency||"USD")}</span>
-          </p>)}
+        <div className="space-y-4">
+          {expenseCurrencies.map(currency=>settlementByCurrency[currency].sett.length>0&&<div key={currency} className="space-y-2">
+            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+            {settlementByCurrency[currency].sett.map((s,i)=><p key={`${currency}-${i}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
+              <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,currency)}</span>
+            </p>)}
+          </div>)}
         </div>
       </Card>}
     </div>
@@ -2741,6 +2833,10 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         <Select th={th} label={t("paidBy")} value={form.paidBy} onChange={e=>setForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
+        <Select th={th} label="Split mode" value={form.splitType} onChange={e=>setForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+          <option value="equal">Equal (auto divide)</option>
+          <option value="custom">Custom amounts</option>
+        </Select>
         <div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
           <div className="flex flex-wrap gap-2">
@@ -2752,11 +2848,18 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
               {dn(m)}
             </button>)}
           </div>
-          <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>
-            {t("perPerson")}: {fmtCur(perPerson,form.currency)}
-          </p>
+          {form.splitType==="equal"
+            ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(perPerson,form.currency)}</p>
+            : <div className="mt-2 space-y-2">
+              {(form.participants.length?form.participants:members.map(m=>m.id)).map(pid=>{
+                const member=members.find(m=>m.id===pid);
+                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={form.customSplits[pid] ?? 0}
+                  onChange={e=>setForm(f=>({...f,customSplits:{...f.customSplits,[pid]:Number(e.target.value||0)}}))}/>;
+              })}
+            </div>}
         </div>
         <Textarea th={th} label={t("expNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
+        {formError&&<p className="text-sm text-rose-400">{formError}</p>}
         <Btn th={th} type="submit">{t("add")}</Btn>
       </form>
     </Modal>
@@ -2776,6 +2879,10 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         <Select th={th} label={t("paidBy")} value={editForm.paidBy} onChange={e=>setEditForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
+        <Select th={th} label="Split mode" value={editForm.splitType} onChange={e=>setEditForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+          <option value="equal">Equal (auto divide)</option>
+          <option value="custom">Custom amounts</option>
+        </Select>
         <div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
           <div className="flex flex-wrap gap-2">
@@ -2787,11 +2894,18 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
               {dn(m)}
             </button>)}
           </div>
-          <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>
-            {t("perPerson")}: {fmtCur(editPerPerson,editForm.currency)}
-          </p>
+          {editForm.splitType==="equal"
+            ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(editPerPerson,editForm.currency)}</p>
+            : <div className="mt-2 space-y-2">
+              {(editForm.participants.length?editForm.participants:members.map(m=>m.id)).map(pid=>{
+                const member=members.find(m=>m.id===pid);
+                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={editForm.customSplits[pid] ?? 0}
+                  onChange={e=>setEditForm(f=>({...f,customSplits:{...f.customSplits,[pid]:Number(e.target.value||0)}}))}/>;
+              })}
+            </div>}
         </div>
         <Textarea th={th} label={t("expNotes")} value={editForm.notes} onChange={e=>setEditForm(f=>({...f,notes:e.target.value}))}/>
+        {editFormError&&<p className="text-sm text-rose-400">{editFormError}</p>}
         <Btn th={th} type="submit">{t("save")}</Btn>
       </form>
     </Modal>
@@ -2809,8 +2923,9 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
 
   const cats=siteCfg.luggageCategories||[];
   const visibleItems=(trip.packingList ?? []).filter(item=>item.isSharedDefault || item.createdById===user.id || item.assignedTo===dn(user));
+  const isPackedByUser = (item:PackingItem)=>Boolean(item.packedBy?.[user.id] ?? item.packedBy?.legacy ?? item.packed);
   const filteredItems=cat==="all"?visibleItems:visibleItems.filter(it=>it.category===cat);
-  const packed=filteredItems.filter(it=>it.packed).length;
+  const packed=filteredItems.filter(it=>isPackedByUser(it)).length;
   const packedPct=filteredItems.length?Math.round((packed/filteredItems.length)*100):0;
   const groupedItems=(cat==="all"?cats.map(c=>c.name):[cat]).map(categoryName=>({
     categoryName,
@@ -2911,13 +3026,13 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
           {groupsToRender.map(group=><div key={group.categoryName} className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-lg">{group.categoryName}</h3>
-              <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{group.items.filter(item=>item.packed).length}/{group.items.length}</p>
+              <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{group.items.filter(item=>isPackedByUser(item)).length}/{group.items.length}</p>
             </div>
             <div className="space-y-2">
               {group.items.map(it=><div key={it.id} className={cx("flex items-center gap-4 rounded-2xl border px-4 py-4 transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06]":"border-slate-200 bg-white/80 hover:bg-white")}>
-                <button type="button" onClick={()=>onToggle(trip.id,it.id)} className={cx("flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm font-bold transition",it.packed?"border-cyan-400 bg-cyan-400 text-slate-950":(th==="dark"?"border-white/15 text-transparent hover:border-cyan-400":"border-slate-300 text-transparent hover:border-slate-500"))}>✓</button>
+                <button type="button" onClick={()=>onToggle(trip.id,it.id)} className={cx("flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-sm font-bold transition",isPackedByUser(it)?"border-cyan-400 bg-cyan-400 text-slate-950":(th==="dark"?"border-white/15 text-transparent hover:border-cyan-400":"border-slate-300 text-transparent hover:border-slate-500"))}>✓</button>
                 <div className="flex-1 min-w-0">
-                  <p className={cx("font-medium",it.packed&&"line-through opacity-50")}>{it.label}</p>
+                  <p className={cx("font-medium",isPackedByUser(it)&&"line-through opacity-50")}>{it.label}</p>
                   <p className={cx("text-xs mt-1",th==="dark"?"text-slate-500":"text-slate-400")}>{it.isSharedDefault?"Shared default":it.assignedTo}</p>
                 </div>
                 <button type="button" onClick={()=>it.isSharedDefault?onRemoveShared(trip.id,it.id):onRemove(trip.id,it.id)} className="text-rose-400 opacity-70 hover:opacity-100" disabled={it.isSharedDefault&&!isOwner}>✕</button>
@@ -2989,7 +3104,7 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
   </div>;
 }
 
-function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;}){
+function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
   const isMobileScreen=useMobileScreen();
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
@@ -3050,6 +3165,13 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     const ok=window.confirm(`${t("deleteTripConfirm")} "${trip.title}"`);
     if(!ok) return;
     onDeleteTrip(trip.id);
+    onBack();
+  };
+  const leaveTrip=()=>{
+    if(isOwner) return;
+    const ok=window.confirm(`Leave "${trip.title}"?`);
+    if(!ok) return;
+    onLeaveTrip(trip.id);
     onBack();
   };
 
@@ -3198,6 +3320,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
       <p className={cx("text-lg",th==="dark"?"text-slate-400":"text-slate-500")}>
         ⚙️ {t("settingsOwnerCoOwnerOnly")}
       </p>
+      {!isOwner&&<div className="mt-5">
+        <Btn th={th} v="danger" onClick={leaveTrip}>Quit trip</Btn>
+      </div>}
     </Card>;
   }
 
@@ -3320,9 +3445,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
         {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
-          <div className="flex gap-2">
-            <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="flex-1"/>
-            <Btn th={th} v="sec" type="button" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("search")}</Btn>
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="w-full"/>
+            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):`🔎 ${t("search")}`}</Btn>
           </div>
           {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
             <option value="">Select location</option>
@@ -3502,6 +3627,7 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{
           onRemoveSharedPack={()=>{}}
           onUpdateItin={()=>{}}
           onRemoveExp={()=>{}}
+          onLeaveTrip={()=>{}}
           readOnly
         />}
       </div>
@@ -3893,6 +4019,7 @@ export function App(){
     const cats=siteCfg.luggageCategories||[];
     const packing:PackingItem[]=cats.flatMap(c=>c.defaultItems.map(l=>({
       id:uid("pk"),label:l,category:c.name,assignedTo:"ALL_TRAVELERS",packed:false,isSharedDefault:true,createdById:user.id,
+      packedBy:{},
     })));
     const trip:Trip={
       id:tripCode(),ownerId:user.id,ownerName:dn(user),
@@ -3915,7 +4042,7 @@ export function App(){
     setTrips(c=>c.map(t=>t.id===code?{
       ...t,
       members:[...t.members,user.id],
-      memberRoles:{...(t.memberRoles ?? {}),[user.id]:"joiner"},
+      memberRoles:{...(t.memberRoles ?? {}),[user.id]:"viewer"},
       itineraryChecklists:{...(t.itineraryChecklists ?? {}),[user.id]:{}},
     }:t));
     return{ok:true,message:`Joined "${trip.title}"!`};
@@ -3927,19 +4054,45 @@ export function App(){
   const removeExpense=(tid:string,eid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,expenses:t.expenses.filter(e=>e.id!==eid)}:t));
   const addPack=(tid:string,l:string,cat:string)=>{
     if(!user)return;
-    setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:dn(user),packed:false,createdById:user.id}]}:t));
+    setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:dn(user),packedBy:{[user.id]:false},createdById:user.id}]}:t));
   };
-  const togglePack=(tid:string,iid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:t.packingList.map(i=>i.id===iid?{...i,packed:!i.packed}:i)}:t));
+  const togglePack=(tid:string,iid:string)=>{
+    if(!user) return;
+    setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:t.packingList.map(i=>i.id===iid?{...i,packedBy:{...(i.packedBy ?? {}),[user.id]:!(i.packedBy?.[user.id] ?? i.packedBy?.legacy ?? i.packed)}}:i)}:t));
+  };
   const removePack=(tid:string,iid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:t.packingList.filter(i=>i.id!==iid)}:t));
   const addSharedPack=(tid:string,l:string,cat:string)=>{
     if(!user)return;
-    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:"ALL_TRAVELERS",packed:false,isSharedDefault:true,createdById:user.id}]}:t));
+    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:"ALL_TRAVELERS",packedBy:{},isSharedDefault:true,createdById:user.id}]}:t));
   };
   const removeSharedPack=(tid:string,iid:string)=>{
     if(!user)return;
     setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,packingList:t.packingList.filter(i=>!(i.id===iid&&i.isSharedDefault))}:t));
   };
   const updateItin=(tid:string,items:ItineraryItem[])=>setTrips(c=>c.map(t=>t.id===tid?{...t,itinerary:items}:t));
+  const leaveTrip=(tripId:string)=>{
+    if(!user) return;
+    setTrips(c=>c.map(t=>{
+      if(t.id!==tripId || t.ownerId===user.id) return t;
+      const nextRoles={...(t.memberRoles ?? {})};
+      delete nextRoles[user.id];
+      const nextChecklists={...(t.itineraryChecklists ?? {})};
+      delete nextChecklists[user.id];
+      return {
+        ...t,
+        members:t.members.filter(memberId=>memberId!==user.id),
+        memberRoles:nextRoles,
+        itineraryChecklists:nextChecklists,
+        expenses:t.expenses
+          .filter(exp=>exp.paidBy!==user.id)
+          .map(exp=>({
+            ...exp,
+            participants:exp.participants.filter(pid=>pid!==user.id),
+            customSplits:Object.fromEntries(Object.entries(exp.customSplits ?? {}).filter(([pid])=>pid!==user.id)),
+          })),
+      };
+    }));
+  };
   const deleteTrip=(id:string)=>setTrips(c=>c.filter(t=>t.id!==id));
   const deleteTraveler=(id:string)=>{
     setProfiles(c=>c.filter(p=>p.id!==id));
@@ -3988,6 +4141,7 @@ export function App(){
           onRemoveSharedPack={()=>{}}
           onUpdateItin={()=>{}}
           onRemoveExp={()=>{}}
+          onLeaveTrip={()=>{}}
           readOnly
         />}
       </div>
@@ -4054,7 +4208,7 @@ export function App(){
         phone: d.phone!==undefined ? d.phone.replace(/\D/g,"").slice(0,8) : p.phone,
         homeAirport: d.homeAirport!==undefined ? (normalizeAirport(d.homeAirport)||"HKG") : p.homeAirport,
       }:p))}
-      onCreate={createTrip} onJoin={joinTrip} onTripUpdate={updateTrip}
+      onCreate={createTrip} onJoin={joinTrip} onLeaveTrip={leaveTrip} onTripUpdate={updateTrip}
       onDeleteTrip={deleteTrip}
       onAddExp={addExpense} onUpdateExp={updateExpense} onAddPack={addPack} onTogglePack={togglePack} onRemovePack={removePack}
       onAddSharedPack={addSharedPack} onRemoveSharedPack={removeSharedPack}
