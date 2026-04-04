@@ -203,6 +203,28 @@ function usePersist<T>(key:string,init:T){
   return [s,set] as const;
 }
 
+function usePortraitMobile(){
+  const [isPortraitMobile,setIsPortraitMobile]=useState(()=>{
+    if(typeof window==="undefined") return false;
+    return window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
+  });
+
+  useEffect(()=>{
+    if(typeof window==="undefined") return;
+    const mediaQuery=window.matchMedia("(max-width: 767px) and (orientation: portrait)");
+    const update=()=>setIsPortraitMobile(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener?.("change",update);
+    window.addEventListener("resize",update);
+    return ()=>{
+      mediaQuery.removeEventListener?.("change",update);
+      window.removeEventListener("resize",update);
+    };
+  },[]);
+
+  return isPortraitMobile;
+}
+
 const CLOUD_DEVICE_ID_KEY = "tp-cloud-device-id";
 const CLOUD_WORKER_ENDPOINT_KEY = "tp-cloud-worker-endpoint";
 const CLOUD_CF_ACCOUNT_ID_KEY = "tp-cloudflare-account-id";
@@ -1768,6 +1790,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
   const canManageItinerary=!readOnly&&canEditItinerary(role);
   const canManageExpenses=!readOnly&&canEditExpenses(role);
   const status=getTripStatus(trip);
+  const isPortraitMobile=usePortraitMobile();
 
   const tripTabs:{id:TripTab;label:string;icon:string}[]=[
     {id:"overview",label:t("overview"),icon:"📋"},{id:"travelers",label:t("travelers"),icon:"👥"},{id:"itinerary",label:t("itinerary"),icon:"🗓️"},
@@ -1775,13 +1798,13 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     {id:"settings",label:t("settings"),icon:"⚙️"},
   ];
 
-  return <div className="space-y-6">
+  return <div className={cx("space-y-6",isPortraitMobile&&"space-y-4")}>
     <div className="flex items-center gap-4">
       <Btn th={th} v="ghost" sz="sm" onClick={onBack}>← {t("back")}</Btn>
     </div>
 
     {/* TRIP HEADER */}
-    <div className="relative overflow-hidden rounded-3xl" style={{minHeight:"280px"}}>
+    <div className={cx("relative overflow-hidden rounded-3xl",isPortraitMobile&&"rounded-2xl")} style={{minHeight:isPortraitMobile?"220px":"280px"}}>
       <div className="absolute inset-0 bg-gradient-to-br from-blue-500 to-purple-600" style={{background:trip.bannerImage?`url(${trip.bannerImage}) center/cover`:trip.bannerColor}}/>
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"/>
       <div className="relative z-10 p-5 text-white sm:p-10">
@@ -1793,7 +1816,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
         </div>
         <h1 className="mb-3 text-3xl font-black sm:text-5xl">{trip.title}</h1>
         <p className="mb-6 text-lg sm:text-2xl">📍 {trip.location}</p>
-        <div className="flex flex-wrap gap-3 text-sm sm:gap-4 sm:text-lg">
+        <div className={cx("flex flex-wrap gap-3 text-sm sm:gap-4 sm:text-lg",isPortraitMobile&&"grid grid-cols-2 gap-2 text-sm")}>
           <span>📅 {fmtDate(trip.startDate)} – {fmtDate(trip.endDate)}</span>
           <span>⏱️ {trip.duration} {t("days")}</span>
           <span>👥 {trip.members.length} {t("members")}</span>
@@ -1802,7 +1825,11 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
       </div>
     </div>
 
-    <Tabs tabs={tripTabs} active={tab} onChange={setTab} th={th}/>
+    {isPortraitMobile
+      ? <Select th={th} label="Section" value={tab} onChange={e=>setTab(e.target.value as TripTab)}>
+          {tripTabs.map(item=><option key={item.id} value={item.id}>{item.icon} {item.label}</option>)}
+        </Select>
+      : <Tabs tabs={tripTabs} active={tab} onChange={setTab} th={th}/>}
 
     {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} canEdit={!readOnly} th={th} t={t} onUpdate={onUpdate}/>} 
     {tab==="travelers"&&<TripTravelers trip={trip} user={user} profiles={profiles} th={th} t={t} onUpdateTrip={onUpdate}/>} 
