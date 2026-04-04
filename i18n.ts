@@ -174,6 +174,16 @@ const en = {
 
   language: "Language", english: "English", chinese: "繁體中文",
   darkMode: "Dark", lightMode: "Light",
+  section: "Section", overviewDetails: "Overview details", moreSettings: "More settings",
+  none: "None", unknown: "Unknown", joinersCanEditExpenses: "All travellers can add, edit, and remove expenses.",
+  saveDocuments: "Save Documents", unsavedAttachments: "You have uploaded files. Click Save Documents to keep them.",
+  expand: "Expand", collapse: "Collapse", editExpense: "Edit Expense",
+  settingsOwnerCoOwnerOnly: "Settings — owner / co-owner only",
+  bannerUploadedRememberSave: "Banner uploaded. Remember to click Save.",
+  bannerUploadFailed: "Failed to process banner image.",
+  rememberSaveEdits: "Remember to save your edits.",
+  deleteTripConfirm: "Delete this trip permanently?",
+  ownerDeleteTripNote: "Trip owner only: delete this trip permanently.",
 };
 
 const zh: typeof en = {
@@ -350,6 +360,16 @@ const zh: typeof en = {
 
   language: "語言", english: "English", chinese: "繁體中文",
   darkMode: "深色", lightMode: "淺色",
+  section: "分頁", overviewDetails: "概覽細節", moreSettings: "更多設定",
+  none: "無", unknown: "未知", joinersCanEditExpenses: "所有旅客都可以新增、編輯及刪除開支。",
+  saveDocuments: "儲存文件", unsavedAttachments: "你已上傳檔案。請按「儲存文件」以保留。",
+  expand: "展開", collapse: "收合", editExpense: "編輯開支",
+  settingsOwnerCoOwnerOnly: "設定 — 僅限擁有者 / 共同擁有者",
+  bannerUploadedRememberSave: "橫幅已上傳。請記得按儲存。",
+  bannerUploadFailed: "處理橫幅圖片失敗。",
+  rememberSaveEdits: "請記得儲存你的修改。",
+  deleteTripConfirm: "要永久刪除此旅程嗎？",
+  ownerDeleteTripNote: "僅限旅程擁有者：可永久刪除此旅程。",
 };
 
 export const translations: Record<Language, typeof en> = { en, zh };
