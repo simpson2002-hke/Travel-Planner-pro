@@ -183,7 +183,7 @@ const getTripRole = (trip:Trip,userId:string):TripRole=>{
 };
 const canEditSettings = (role:TripRole)=>role==="owner"||role==="co-owner";
 const canEditItinerary = (role:TripRole)=>role==="owner"||role==="co-owner";
-const canEditExpenses = (role:TripRole)=>role==="owner"||role==="co-owner";
+const canEditExpenses = (_role:TripRole)=>true;
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -1580,12 +1580,13 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
 /* ═══════════════════════════════════════════════════════════════════════════════
    USER WORKSPACE
    ═══════════════════════════════════════════════════════════════════════════════ */
-function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoin,onTripUpdate,onDeleteTrip,onAddExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp}:{
+function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoin,onTripUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp}:{
   user:Profile;trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;
   onUpdate:(d:Partial<Profile>)=>void;onCreate:(d:{title:string;location:string;startDate:string;endDate:string})=>void;
   onJoin:(code:string)=>{ok:boolean;message:string};onTripUpdate:(id:string,d:Partial<Trip>)=>void;
   onDeleteTrip:(id:string)=>void;
   onAddExp:(tid:string,e:Omit<Expense,"id">)=>void;onAddPack:(tid:string,l:string,cat:string)=>void;
+  onUpdateExp:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;
   onTogglePack:(tid:string,iid:string)=>void;onRemovePack:(tid:string,iid:string)=>void;
   onAddSharedPack:(tid:string,l:string,cat:string)=>void;onRemoveSharedPack:(tid:string,iid:string)=>void;
   onUpdateItin:(tid:string,items:ItineraryItem[])=>void;onRemoveExp:(tid:string,eid:string)=>void;
@@ -1607,7 +1608,7 @@ function UserWorkspace({user,trips,profiles,siteCfg,th,t,onUpdate,onCreate,onJoi
       :<TripDetail trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} th={th} t={t} onBack={()=>setActiveTrip(null)}
         onUpdate={onTripUpdate} onDeleteTrip={onDeleteTrip} onAddExp={onAddExp} onAddPack={onAddPack} onTogglePack={onTogglePack} onRemovePack={onRemovePack}
         onAddSharedPack={onAddSharedPack} onRemoveSharedPack={onRemoveSharedPack}
-        onUpdateItin={onUpdateItin} onRemoveExp={onRemoveExp}/>}
+        onUpdateItin={onUpdateItin} onRemoveExp={onRemoveExp} onUpdateExp={onUpdateExp}/>}
     </>}
   </div>;
 }
@@ -1796,9 +1797,10 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
   </Card>;
 }
 
-function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp,readOnly=false}:{
+function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTrip,onAddExp,onUpdateExp,onAddPack,onTogglePack,onRemovePack,onAddSharedPack,onRemoveSharedPack,onUpdateItin,onRemoveExp,readOnly=false}:{
   trip:Trip;user:Profile;profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onBack:()=>void;
   onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onAddExp:(tid:string,e:Omit<Expense,"id">)=>void;
+  onUpdateExp:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;
   onAddPack:(tid:string,l:string,cat:string)=>void;onTogglePack:(tid:string,iid:string)=>void;
   onAddSharedPack:(tid:string,l:string,cat:string)=>void;onRemoveSharedPack:(tid:string,iid:string)=>void;
   onRemovePack:(tid:string,iid:string)=>void;onUpdateItin:(tid:string,items:ItineraryItem[])=>void;
@@ -1849,7 +1851,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     </div>
 
     {isMobileScreen
-      ? <Select th={th} label="Section" value={tab} onChange={e=>setTab(e.target.value as TripTab)}>
+      ? <Select th={th} label={t("section")} value={tab} onChange={e=>setTab(e.target.value as TripTab)}>
           {tripTabs.map(item=><option key={item.id} value={item.id}>{item.icon} {item.label}</option>)}
         </Select>
       : <Tabs tabs={tripTabs} active={tab} onChange={setTab} th={th}/>}
@@ -1857,7 +1859,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     {tab==="overview"&&<TripOverview trip={trip} user={user} profiles={profiles} siteCfg={siteCfg} canEdit={!readOnly} th={th} t={t} onUpdate={onUpdate}/>} 
     {tab==="travelers"&&<TripTravelers trip={trip} user={user} profiles={profiles} th={th} t={t} onUpdateTrip={onUpdate}/>} 
     {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
-    {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onRemove={onRemoveExp}/>}
+    {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onUpdateExpense={onUpdateExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} user={user} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack} onAddShared={onAddSharedPack} onRemoveShared={onRemoveSharedPack}/>}
     {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack}/>}
   </div>;
@@ -1993,7 +1995,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
       </Card>
 
       {isMobileScreen&&<Card th={th} className="p-4 space-y-3">
-        <Select th={th} label="Overview details" value={mobileSection} onChange={e=>setMobileSection(e.target.value as "flight"|"hotel"|"notes"|"weather")}>
+        <Select th={th} label={t("overviewDetails")} value={mobileSection} onChange={e=>setMobileSection(e.target.value as "flight"|"hotel"|"notes"|"weather")}>
           <option value="flight">{t("flightLegs")}</option>
           <option value="hotel">{t("hotelStays")}</option>
           <option value="notes">{t("travelNotes")}</option>
@@ -2076,7 +2078,9 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <Input th={th} value={urlInput} onChange={e=>setUrlInput(e.target.value)} placeholder={t("fileUrl")} className="flex-1" disabled={!canEdit}/>
             <Btn th={th} v="sec" sz="sm" onClick={addUrl} disabled={!canEdit}>{t("add")}</Btn>
           </div>
+          <Btn th={th} sz="sm" onClick={addNote} disabled={!canEdit||(!noteText.trim()&&noteFiles.length===0)}>💾 {t("saveDocuments")}</Btn>
         </div>
+        {noteFiles.length>0&&<p className={cx("text-xs",th==="dark"?"text-amber-300":"text-amber-700")}>{t("unsavedAttachments")}</p>}
         {noteFiles.length>0&&<div className="space-y-2">{noteFiles.map((file,index)=><div key={`${file.name}-${index}`} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3",th==="dark"?"bg-white/6":"bg-slate-100")}>
           <span className="truncate font-medium">{file.name}</span>
           <button onClick={()=>setNoteFiles(files=>files.filter((_,fileIndex)=>fileIndex!==index))} className="text-rose-400" disabled={!canEdit}>✕</button>
@@ -2592,9 +2596,11 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
   </div>;
 }
 
-function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Trip;user:Profile;canEdit:boolean;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
+function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onRemove}:{trip:Trip;user:Profile;canEdit:boolean;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onUpdateExpense:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
   const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:""});
   const [showForm,setShowForm]=useState(false);
+  const [editingExpenseId,setEditingExpenseId]=useState<string|null>(null);
+  const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:""});
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const settlement=settlements(trip,profiles);
@@ -2614,6 +2620,24 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
   };
 
   const perPerson=form.amount/(form.participants.length||members.length||1);
+  const editPerPerson=editForm.amount/(editForm.participants.length||members.length||1);
+  const toggleEditParticipant=(pid:string)=>{
+    setEditForm(f=>({...f,participants:f.participants.includes(pid)?f.participants.filter(x=>x!==pid):[...f.participants,pid]}));
+  };
+  const startEdit=(expense:Expense)=>{
+    setEditingExpenseId(expense.id);
+    setEditForm({
+      date:expense.date,title:expense.title,amount:expense.amount,currency:expense.currency,
+      category:expense.category,paidBy:expense.paidBy,participants:[...expense.participants],notes:expense.notes,
+    });
+  };
+  const saveEdit=(e:React.FormEvent)=>{
+    e.preventDefault();
+    if(!editingExpenseId||!canEdit) return;
+    if(!editForm.title.trim()||editForm.amount<=0)return;
+    onUpdateExpense(trip.id,editingExpenseId,{...editForm,participants:editForm.participants.length?editForm.participants:members.map(m=>m.id)});
+    setEditingExpenseId(null);
+  };
 
   return <div className="grid min-w-0 lg:grid-cols-3 gap-4 sm:gap-6">
     <div className="min-w-0 lg:col-span-2 space-y-4 sm:space-y-6">
@@ -2622,7 +2646,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
           <h2 className="text-2xl font-bold">{t("expenses")}</h2>
           <Btn th={th} onClick={()=>setShowForm(true)} disabled={!canEdit}>+ {t("addExpense")}</Btn>
         </div>
-        {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Joiners can view expenses but cannot add or remove entries.</p>}
+        {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("joinersCanEditExpenses")}</p>}
 
         {/* Balance Summary */}
         {myBal&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
@@ -2662,14 +2686,17 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
                     <p className="text-2xl font-bold text-cyan-400">{fmtCur(exp.amount,exp.currency)}</p>
                   </div>
                   <p className={cx("text-sm break-words",th==="dark"?"text-slate-400":"text-slate-500")}>
-                    {t("paidBy")}: {payer?dn(payer):"Unknown"} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
+                    {t("paidBy")}: {payer?dn(payer):t("unknown")} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
                     {exp.participants.length>0&&<span className="ml-2">
                       ({exp.participants.map(pid=>members.find(m=>m.id===pid)).filter(Boolean).map(m=>dn(m!)).join(", ")})
                     </span>}
                   </p>
                   {exp.notes&&<p className={cx("text-sm mt-1",th==="dark"?"text-slate-300":"text-slate-600")}>{exp.notes}</p>}
                 </div>
-                <button onClick={()=>onRemove(trip.id,exp.id)} disabled={!canEdit} className="self-end sm:self-auto opacity-60 hover:opacity-100 text-rose-400 text-xl disabled:opacity-30">✕</button>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <Btn th={th} v="sec" sz="sm" onClick={()=>startEdit(exp)} disabled={!canEdit}>{t("edit")}</Btn>
+                  <button onClick={()=>onRemove(trip.id,exp.id)} disabled={!canEdit} className="opacity-60 hover:opacity-100 text-rose-400 text-xl disabled:opacity-30">✕</button>
+                </div>
               </div>
             </Card>;
           })}
@@ -2719,6 +2746,41 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
         </div>
         <Textarea th={th} label={t("expNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
         <Btn th={th} type="submit">{t("add")}</Btn>
+      </form>
+    </Modal>
+    <Modal open={Boolean(editingExpenseId)} onClose={()=>setEditingExpenseId(null)} th={th} title={t("editExpense")}>
+      <form onSubmit={saveEdit} className="space-y-4">
+        <Input th={th} label={t("date")} type="date" value={editForm.date} onChange={e=>setEditForm(f=>({...f,date:e.target.value}))}/>
+        <Input th={th} label={t("activity")} value={editForm.title} onChange={e=>setEditForm(f=>({...f,title:e.target.value}))}/>
+        <div className="grid grid-cols-2 gap-3">
+          <Input th={th} label={t("amount")} type="number" step="0.01" value={editForm.amount||""} onChange={e=>setEditForm(f=>({...f,amount:+e.target.value}))}/>
+          <Select th={th} label={t("currency")} value={editForm.currency} onChange={e=>setEditForm(f=>({...f,currency:e.target.value}))}>
+            {CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}
+          </Select>
+        </div>
+        <Select th={th} label={t("category")} value={editForm.category} onChange={e=>setEditForm(f=>({...f,category:e.target.value}))}>
+          {EXPENSE_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+        </Select>
+        <Select th={th} label={t("paidBy")} value={editForm.paidBy} onChange={e=>setEditForm(f=>({...f,paidBy:e.target.value}))}>
+          {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
+        </Select>
+        <div>
+          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
+          <div className="flex flex-wrap gap-2">
+            {members.map(m=><button key={m.id} type="button" onClick={()=>toggleEditParticipant(m.id)}
+              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
+                editForm.participants.includes(m.id)||(editForm.participants.length===0)
+                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
+                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
+              {dn(m)}
+            </button>)}
+          </div>
+          <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>
+            {t("perPerson")}: {fmtCur(editPerPerson,editForm.currency)}
+          </p>
+        </div>
+        <Textarea th={th} label={t("expNotes")} value={editForm.notes} onChange={e=>setEditForm(f=>({...f,notes:e.target.value}))}/>
+        <Btn th={th} type="submit">{t("save")}</Btn>
       </form>
     </Modal>
   </div>;
@@ -2928,8 +2990,15 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const [quickFlightNumber,setQuickFlightNumber]=useState("");
   const [quickHotelQuery,setQuickHotelQuery]=useState("");
   const [mobileDetailSection,setMobileDetailSection]=useState<"none"|"flights"|"hotels"|"weather"|"banner">("none");
+  const [expandedFlightIds,setExpandedFlightIds]=useState<string[]>([]);
+  const [expandedHotelIds,setExpandedHotelIds]=useState<string[]>([]);
 
-  useEffect(()=>{ setForm({...trip,bannerImageUrl:""}); setHasUnsavedChanges(false); },[trip]);
+  useEffect(()=>{
+    setForm({...trip,bannerImageUrl:""});
+    setHasUnsavedChanges(false);
+    setExpandedFlightIds((trip.flightLegs ?? []).map(leg=>leg.id));
+    setExpandedHotelIds((trip.hotels ?? []).map(hotel=>hotel.id));
+  },[trip]);
   useEffect(()=>{
     const baseline = JSON.stringify({...trip,bannerImageUrl:""});
     const current = JSON.stringify(form);
@@ -2955,7 +3024,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   };
   const removeTrip=()=>{
     if(!isOwner) return;
-    const ok=window.confirm(`Delete "${trip.title}" permanently?`);
+    const ok=window.confirm(`${t("deleteTripConfirm")} "${trip.title}"`);
     if(!ok) return;
     onDeleteTrip(trip.id);
     onBack();
@@ -2966,9 +3035,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     try{
       const url=await readImageFile(file);
       setForm(f=>({...f,bannerImage:url}));
-      setBannerMessage("Banner uploaded. Remember to click Save.");
+      setBannerMessage(t("bannerUploadedRememberSave"));
     }catch(error){
-      setBannerMessage(error instanceof Error ? error.message : "Failed to process banner image.");
+      setBannerMessage(error instanceof Error ? error.message : t("bannerUploadFailed"));
     }finally{
       e.target.value="";
     }
@@ -2984,6 +3053,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const addLeg=async()=>{
     const leg={id:uid("flt"),airline:"",flightNumber:quickFlightNumber.trim(),departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",notes:""};
     setForm(f=>({...f,flightLegs:[leg,...f.flightLegs]}));
+    setExpandedFlightIds(ids=>[leg.id,...ids]);
     if(!quickFlightNumber.trim())return;
     setFlightSearchingId(leg.id);
     try{
@@ -2993,10 +3063,20 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
       setFlightMessage(t("flightAutoFilled"));
     }finally{setFlightSearchingId(null);}
   };
-  const removeLeg=(legId:string)=>setForm(f=>({...f,flightLegs:f.flightLegs.filter(leg=>leg.id!==legId)}));
+  const removeLeg=(legId:string)=>{
+    setForm(f=>({...f,flightLegs:f.flightLegs.filter(leg=>leg.id!==legId)}));
+    setExpandedFlightIds(ids=>ids.filter(id=>id!==legId));
+  };
   const updateHotel=(hotelId:string,patch:Partial<HotelStay>)=>setForm(f=>({...f,hotels:f.hotels.map(hotel=>hotel.id===hotelId?{...hotel,...patch}:hotel)}));
-  const addHotel=()=>setForm(f=>({...f,hotels:[{id:uid("htl"),hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",contact:"",notes:""},...f.hotels]}));
-  const removeHotel=(hotelId:string)=>setForm(f=>({...f,hotels:f.hotels.filter(hotel=>hotel.id!==hotelId)}));
+  const addHotel=()=>{
+    const nextHotel={id:uid("htl"),hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",contact:"",notes:""};
+    setForm(f=>({...f,hotels:[nextHotel,...f.hotels]}));
+    setExpandedHotelIds(ids=>[nextHotel.id,...ids]);
+  };
+  const removeHotel=(hotelId:string)=>{
+    setForm(f=>({...f,hotels:f.hotels.filter(hotel=>hotel.id!==hotelId)}));
+    setExpandedHotelIds(ids=>ids.filter(id=>id!==hotelId));
+  };
 
   const ensureFirstLeg=()=>{
     if(form.flightLegs.length>0)return form.flightLegs[0];
@@ -3062,7 +3142,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   if(!canEdit){
     return <Card th={th} className="p-5 sm:p-8 text-center">
       <p className={cx("text-lg",th==="dark"?"text-slate-400":"text-slate-500")}>
-        ⚙️ {t("settings")} — owner / co-owner only
+        ⚙️ {t("settingsOwnerCoOwnerOnly")}
       </p>
     </Card>;
   }
@@ -3092,8 +3172,8 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
       </div>
     </Card>
     {isMobileScreen&&<Card th={th} className="p-4">
-      <Select th={th} label="More settings" value={mobileDetailSection} onChange={e=>setMobileDetailSection(e.target.value as "none"|"flights"|"hotels"|"weather"|"banner")}>
-        <option value="none">None</option>
+      <Select th={th} label={t("moreSettings")} value={mobileDetailSection} onChange={e=>setMobileDetailSection(e.target.value as "none"|"flights"|"hotels"|"weather"|"banner")}>
+        <option value="none">{t("none")}</option>
         <option value="flights">{t("flightLegs")}</option>
         <option value="hotels">{t("hotelStays")}</option>
         <option value="weather">{t("weatherLocationSettings")}</option>
@@ -3110,13 +3190,16 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
         <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightSearchByNumberHint")}</p>
         {flightMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{flightMessage}</p>}
         <div className="space-y-4">
-          {form.flightLegs.map((leg,index)=><details key={leg.id} open={index===0} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          {form.flightLegs.map((leg,index)=><details key={leg.id} open={expandedFlightIds.includes(leg.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
               <div className="space-y-1">
                 <p className="font-semibold">{t("flightDetails")} {index+1}</p>
                 <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("autoSearchFlight")}</p>
               </div>
               <div className="flex items-center gap-2">
+                <Btn th={th} v="ghost" sz="sm" type="button" onClick={(e)=>{e.preventDefault();setExpandedFlightIds(ids=>ids.includes(leg.id)?ids.filter(id=>id!==leg.id):[...ids,leg.id]);}}>
+                  {expandedFlightIds.includes(leg.id)?t("collapse"):t("expand")}
+                </Btn>
                 <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void autofillFlight(leg)} disabled={flightSearchingId===leg.id}>{flightSearchingId===leg.id?t("loading"):t("search")}</Btn>
                 <Btn th={th} v="danger" sz="sm" type="button" onClick={()=>removeLeg(leg.id)}>{t("remove")}</Btn>
               </div>
@@ -3147,13 +3230,16 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
         <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("hotelSearchHint")}</p>
         {hotelMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{hotelMessage}</p>}
         <div className="space-y-4">
-          {form.hotels.map((hotel,index)=><details key={hotel.id} open={index===0} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          {form.hotels.map((hotel,index)=><details key={hotel.id} open={expandedHotelIds.includes(hotel.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
               <div className="space-y-1">
                 <p className="font-semibold">{t("hotelDetails")} {index+1}</p>
                 <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("autoFillHotel")}</p>
               </div>
               <div className="flex items-center gap-2">
+                <Btn th={th} v="ghost" sz="sm" type="button" onClick={(e)=>{e.preventDefault();setExpandedHotelIds(ids=>ids.includes(hotel.id)?ids.filter(id=>id!==hotel.id):[...ids,hotel.id]);}}>
+                  {expandedHotelIds.includes(hotel.id)?t("collapse"):t("expand")}
+                </Btn>
                 <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void autofillHotel(hotel)} disabled={hotelSearchingId===hotel.id}>{hotelSearchingId===hotel.id?t("loading"):t("search")}</Btn>
                 <Btn th={th} v="danger" sz="sm" type="button" onClick={()=>removeHotel(hotel.id)}>{t("remove")}</Btn>
               </div>
@@ -3222,10 +3308,10 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     <div className="flex flex-wrap gap-2 items-center">
       <Btn th={th} onClick={save} className="!bg-emerald-500 !text-white hover:!bg-emerald-400 !shadow-lg shadow-emerald-500/30">💾 {t("save")}</Btn>
       {saved&&<span className="text-emerald-400 font-medium">✓ {t("saved")}</span>}
-      {hasUnsavedChanges&&<span className={cx("font-medium",th==="dark"?"text-amber-300":"text-amber-700")}>⚠️ Remember to save your edits.</span>}
+      {hasUnsavedChanges&&<span className={cx("font-medium",th==="dark"?"text-amber-300":"text-amber-700")}>⚠️ {t("rememberSaveEdits")}</span>}
     </div>
     {isOwner&&<div className={cx("rounded-2xl border p-4",th==="dark"?"border-rose-400/30 bg-rose-400/10":"border-rose-200 bg-rose-50")}>
-      <p className={cx("mb-3 text-sm",th==="dark"?"text-rose-100":"text-rose-700")}>Trip owner only: delete this trip permanently.</p>
+      <p className={cx("mb-3 text-sm",th==="dark"?"text-rose-100":"text-rose-700")}>{t("ownerDeleteTripNote")}</p>
       <Btn th={th} v="danger" type="button" onClick={removeTrip}>🗑️ {t("delete")} {t("tripName")}</Btn>
     </div>}
   </Card>;
@@ -3336,6 +3422,7 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{
           onUpdate={()=>{}}
           onDeleteTrip={()=>{}}
           onAddExp={()=>{}}
+          onUpdateExp={()=>{}}
           onAddPack={()=>{}}
           onTogglePack={()=>{}}
           onRemovePack={()=>{}}
@@ -3764,6 +3851,7 @@ export function App(){
 
   const updateTrip=(id:string,d:Partial<Trip>)=>setTrips(c=>c.map(t=>t.id===id?{...t,...d}:t));
   const addExpense=(tid:string,e:Omit<Expense,"id">)=>setTrips(c=>c.map(t=>t.id===tid?{...t,expenses:[{...e,id:uid("ex")},...t.expenses]}:t));
+  const updateExpense=(tid:string,eid:string,e:Omit<Expense,"id">)=>setTrips(c=>c.map(t=>t.id===tid?{...t,expenses:t.expenses.map(exp=>exp.id===eid?{...exp,...e}:exp)}:t));
   const removeExpense=(tid:string,eid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,expenses:t.expenses.filter(e=>e.id!==eid)}:t));
   const addPack=(tid:string,l:string,cat:string)=>{
     if(!user)return;
@@ -3820,6 +3908,7 @@ export function App(){
           onUpdate={()=>{}}
           onDeleteTrip={()=>{}}
           onAddExp={()=>{}}
+          onUpdateExp={()=>{}}
           onAddPack={()=>{}}
           onTogglePack={()=>{}}
           onRemovePack={()=>{}}
@@ -3895,7 +3984,7 @@ export function App(){
       }:p))}
       onCreate={createTrip} onJoin={joinTrip} onTripUpdate={updateTrip}
       onDeleteTrip={deleteTrip}
-      onAddExp={addExpense} onAddPack={addPack} onTogglePack={togglePack} onRemovePack={removePack}
+      onAddExp={addExpense} onUpdateExp={updateExpense} onAddPack={addPack} onTogglePack={togglePack} onRemovePack={removePack}
       onAddSharedPack={addSharedPack} onRemoveSharedPack={removeSharedPack}
       onUpdateItin={updateItin} onRemoveExp={removeExpense}/>}
 
