@@ -1881,6 +1881,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     id:"legacy-hotel",hotelName:trip.hotelName,hotelAddress:trip.hotelAddress,roomType:trip.roomType,checkIn:trip.checkIn,checkOut:trip.checkOut,confirmationCode:trip.confirmationCode,contact:"",notes:"",
   }].filter(stay=>Object.values(stay).some(Boolean));
   const status=getTripStatus(trip);
+  const isMobileScreen=useMobileScreen();
+  const [mobileSection,setMobileSection]=useState<"flight"|"hotel"|"notes"|"weather">("flight");
 
   const loadWeather=async(point?:GeoPoint|null)=>{
     setLoading(true);
@@ -1928,10 +1930,15 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     onUpdate(trip.id,{travelNotes:trip.travelNotes.filter(n=>n.id!==nid)});
   };
 
-  return <div className="grid xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,340px)] gap-6">
+  const showFlightSection=!isMobileScreen||mobileSection==="flight";
+  const showHotelSection=!isMobileScreen||mobileSection==="hotel";
+  const showNotesSection=!isMobileScreen||mobileSection==="notes";
+  const showWeatherSection=!isMobileScreen||mobileSection==="weather";
+
+  return <div className="grid min-w-0 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,340px)] gap-4 sm:gap-6">
     <div className="space-y-6">
-      <Card th={th} className="p-8 lg:p-10">
-        <div className="grid lg:grid-cols-[1.15fr_.85fr] gap-8">
+      <Card th={th} className="p-5 sm:p-8 lg:p-10">
+        <div className="grid min-w-0 lg:grid-cols-[1.15fr_.85fr] gap-5 sm:gap-8">
           <div className="space-y-6">
             <div className="flex flex-wrap items-center gap-3">
               <Badge label={`${t("status")}: ${t(status)}`} th={th} color={getStatusColor(status)}/>
@@ -1985,8 +1992,17 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
         </div>
       </Card>
 
+      {isMobileScreen&&<Card th={th} className="p-4 space-y-3">
+        <Select th={th} label="Overview details" value={mobileSection} onChange={e=>setMobileSection(e.target.value as "flight"|"hotel"|"notes"|"weather")}>
+          <option value="flight">{t("flightLegs")}</option>
+          <option value="hotel">{t("hotelStays")}</option>
+          <option value="notes">{t("travelNotes")}</option>
+          <option value="weather">{t("weather")}</option>
+        </Select>
+      </Card>}
+
       <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card th={th} className="p-8 space-y-5">
+        {showFlightSection&&<Card th={th} className="p-5 sm:p-8 space-y-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-3xl font-bold">{t("flightLegs")}</h3>
@@ -1995,7 +2011,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <Badge label={`${flightLegs.length}`} th={th} color="blue"/>
           </div>
           {flightLegs.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noFlightDetails")}</p>
-          :<div className="space-y-5">{flightLegs.map((leg,index)=><div key={leg.id} className={cx("rounded-[1.9rem] border p-7 min-h-[20rem]",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          :<div className="space-y-5">{flightLegs.map((leg,index)=><div key={leg.id} className={cx("rounded-[1.9rem] border p-5 sm:p-7 min-h-0",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <DetailHeader
               title={[leg.airline, leg.flightNumber].filter(Boolean).join(" ") || `${t("flightDetails")} ${index+1}`}
               subtitle={`${leg.departureAirport || "—"} → ${leg.arrivalAirport || "—"}`}
@@ -2013,9 +2029,9 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               <p className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")}>{leg.notes}</p>
             </div>}
           </div>)}</div>}
-        </Card>
+        </Card>}
 
-        <Card th={th} className="p-8 space-y-5">
+        {showHotelSection&&<Card th={th} className="p-5 sm:p-8 space-y-5">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-3xl font-bold">{t("hotelStays")}</h3>
@@ -2024,7 +2040,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <Badge label={`${hotels.length}`} th={th} color="green"/>
           </div>
           {hotels.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noHotelDetails")}</p>
-          :<div className="space-y-5">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.9rem] border p-7 min-h-[20rem]",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          :<div className="space-y-5">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.9rem] border p-5 sm:p-7 min-h-0",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <DetailHeader
               title={hotel.hotelName || `${t("hotelDetails")} ${index+1}`}
               subtitle={hotel.hotelAddress || "—"}
@@ -2043,10 +2059,10 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               <p className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")}>{hotel.notes}</p>
             </div>}
           </div>)}</div>}
-        </Card>
+        </Card>}
       </div>
 
-      <Card th={th} className="p-7 space-y-5">
+      {showNotesSection&&<Card th={th} className="p-5 sm:p-7 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-2xl font-bold">{t("travelNotes")}</h3>
           <Btn th={th} sz="sm" onClick={addNote} disabled={!canEdit}>+ {t("addNote")}</Btn>
@@ -2080,10 +2096,10 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <span className="text-xs uppercase tracking-[0.18em]">{t("downloadAttachment")}</span>
           </a>)}</div>}
         </div>)}</div>}
-      </Card>
+      </Card>}
     </div>
 
-    <Card th={th} className="sticky top-6 h-fit space-y-4 p-5">
+    {showWeatherSection&&<Card th={th} className="sticky top-6 h-fit space-y-4 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className={cx("text-sm uppercase tracking-[0.2em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("weather")}</p>
@@ -2122,7 +2138,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
           </div>)}
         </div>
       </>}
-    </Card>
+    </Card>}
 
     <Modal open={showCustomLoc} onClose={()=>setShowCustomLoc(false)} th={th} title={t("customLocation")}>
       <div className="space-y-4">
@@ -2141,6 +2157,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
 function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Profile;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onUpdateTrip:(id:string,d:Partial<Trip>)=>void}){
   const members=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
   const isOwner=trip.ownerId===user.id;
+  const isMobileScreen=useMobileScreen();
+  const [selectedMemberId,setSelectedMemberId]=useState(members[0]?.id ?? "");
   const setRole=(memberId:string,role:TripRole)=>{
     if(!isOwner || memberId===trip.ownerId) return;
     onUpdateTrip(trip.id,{memberRoles:{...(trip.memberRoles ?? {}),[memberId]:role}});
@@ -2152,6 +2170,15 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     const role=getTripRole(trip,member.id);
     return {member,paid,expenseTouches,role};
   });
+  const myBalance=settlements(trip,profiles).bal.find(item=>item.id===user.id)?.net ?? 0;
+  useEffect(()=>{
+    if(!memberStats.find(item=>item.member.id===selectedMemberId)){
+      setSelectedMemberId(memberStats[0]?.member.id ?? "");
+    }
+  },[memberStats,selectedMemberId]);
+  const visibleMemberStats=isMobileScreen
+    ? memberStats.filter(item=>item.member.id===selectedMemberId)
+    : memberStats;
 
   return <div className="space-y-5">
     <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
@@ -2164,11 +2191,20 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
           <p className={cx("text-xs uppercase tracking-[0.16em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("expenses")}</p>
           <p className="mt-2 text-2xl font-bold">{trip.expenses.length}</p>
         </div>
+        <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
+          <p className={cx("text-xs uppercase tracking-[0.16em]",th==="dark"?"text-slate-400":"text-slate-500")}>Net ({t("iOwe")})</p>
+          <p className="mt-2 text-2xl font-bold">{myBalance<0?fmtCur(Math.abs(myBalance)):fmtCur(0)}</p>
+        </div>
       </div>
+      {isMobileScreen&&memberStats.length>0&&<div className="mt-4">
+        <Select th={th} label={t("travelers")} value={selectedMemberId} onChange={e=>setSelectedMemberId(e.target.value)}>
+          {memberStats.map(item=><option key={item.member.id} value={item.member.id}>{dn(item.member)}</option>)}
+        </Select>
+      </div>}
     </Card>
 
     <div className="grid xl:grid-cols-2 gap-5">
-      {memberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
+      {visibleMemberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
             <Avatar name={dn(member)} th={th}/>
@@ -2438,10 +2474,10 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
         <Tabs tabs={[{id:"schedule",label:t("itinerarySchedule"),icon:"🗓️"},{id:"saved",label:t("optionalPlaces"),icon:"📌"}]} active={activePane} onChange={setActivePane} th={th}/>
 
         {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative">
-          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"")}>
-            <div className="flex items-start gap-4">
+          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"")}>
+            <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.transport} th={th} color={it.activityType==="free-time"?"amber":undefined}/></div>
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
@@ -2470,7 +2506,7 @@ function TripItinerary({trip,user,profiles,canEdit,th,t,onUpdate,onTripUpdate}:{
                 {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="mt-3 h-40 w-full rounded-2xl border border-white/10"/>}
                 {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-32 w-full rounded-2xl border border-white/10 object-cover"/>}
               </div>
-              <div className="flex gap-2"><button onClick={()=>edit(it)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
+              <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canEdit} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>}
@@ -2614,18 +2650,18 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
           {trip.expenses.map(exp=>{
             const payer=members.find(m=>m.id===exp.paidBy);
             return <Card key={exp.id} th={th} className="p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
                 <div className="flex-1">
-                  <div className="flex items-start justify-between mb-2">
+                  <div className="flex flex-col sm:flex-row items-start justify-between gap-2 mb-2">
                     <div>
-                      <p className="font-bold text-lg">{exp.title}</p>
+                      <p className="font-bold text-lg break-words">{exp.title}</p>
                       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
                         {fmtDate(exp.date)} · {exp.category}
                       </p>
                     </div>
                     <p className="text-2xl font-bold text-cyan-400">{fmtCur(exp.amount,exp.currency)}</p>
                   </div>
-                  <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
+                  <p className={cx("text-sm break-words",th==="dark"?"text-slate-400":"text-slate-500")}>
                     {t("paidBy")}: {payer?dn(payer):"Unknown"} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
                     {exp.participants.length>0&&<span className="ml-2">
                       ({exp.participants.map(pid=>members.find(m=>m.id===pid)).filter(Boolean).map(m=>dn(m!)).join(", ")})
@@ -2633,7 +2669,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
                   </p>
                   {exp.notes&&<p className={cx("text-sm mt-1",th==="dark"?"text-slate-300":"text-slate-600")}>{exp.notes}</p>}
                 </div>
-                <button onClick={()=>onRemove(trip.id,exp.id)} disabled={!canEdit} className="opacity-60 hover:opacity-100 text-rose-400 text-xl disabled:opacity-30">✕</button>
+                <button onClick={()=>onRemove(trip.id,exp.id)} disabled={!canEdit} className="self-end sm:self-auto opacity-60 hover:opacity-100 text-rose-400 text-xl disabled:opacity-30">✕</button>
               </div>
             </Card>;
           })}
@@ -2689,7 +2725,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onRemove}:{trip:Tri
 }
 
 function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onAddShared,onRemoveShared}:{trip:Trip;user:Profile;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,l:string,cat:string)=>void;onToggle:(tid:string,iid:string)=>void;onRemove:(tid:string,iid:string)=>void;onAddShared:(tid:string,l:string,cat:string)=>void;onRemoveShared:(tid:string,iid:string)=>void}){
+  const isMobileScreen=useMobileScreen();
   const [cat,setCat]=useState<string>("all");
+  const [mobileCategory,setMobileCategory]=useState<string>("all");
   const [newItem,setNewItem]=useState("");
   const [newSharedItem,setNewSharedItem]=useState("");
   const [monthlyClimate,setMonthlyClimate]=useState<WeatherData["monthlyClimate"]>([]);
@@ -2704,6 +2742,7 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
     categoryName,
     items: filteredItems.filter(item=>item.category===categoryName),
   })).filter(group=>group.items.length>0);
+  const groupsToRender=isMobileScreen?groupedItems.filter(group=>group.categoryName===mobileCategory):groupedItems;
   const tripMonths=new Set<number>();
   if(trip.startDate&&trip.endDate){
     const cursor=new Date(trip.startDate);
@@ -2739,6 +2778,15 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
     };
     void loadClimate();
   },[trip.id,trip.location,trip.customLocation?.lat,trip.customLocation?.lon,siteCfg.weatherApi.geocodeUrl]);
+  useEffect(()=>{
+    if(groupedItems.length===0){
+      setMobileCategory("all");
+      return;
+    }
+    if(!groupedItems.find(group=>group.categoryName===mobileCategory)){
+      setMobileCategory(groupedItems[0].categoryName);
+    }
+  },[groupedItems,mobileCategory]);
 
   return <div className="grid min-w-0 lg:grid-cols-3 gap-4 sm:gap-6">
     <div className="min-w-0 lg:col-span-2">
@@ -2766,6 +2814,14 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
             {c.name}
           </button>)}
         </div>
+        {isMobileScreen&&<div className="mb-4">
+          <Select th={th} label={t("categories")} value={mobileCategory} onChange={e=>setMobileCategory(e.target.value)}>
+            {groupedItems.map(group=><option key={group.categoryName} value={group.categoryName}>{group.categoryName}</option>)}
+          </Select>
+        </div>}
+        <div className="mb-4 flex flex-wrap gap-2">
+          {cats.map(c=><Badge key={c.id} label={c.name} th={th} color="slate"/>)}
+        </div>
 
         <form onSubmit={add} className="flex flex-col sm:flex-row gap-2 mb-6">
           <Input th={th} value={newItem} onChange={e=>setNewItem(e.target.value)} placeholder={t("itemName")} className="flex-1"/>
@@ -2778,7 +2834,7 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
 
         {filteredItems.length===0?<Empty icon="🧳" title={t("noLuggage")} desc={t("noLuggageDesc")} th={th}/>
         :<div className="space-y-6">
-          {groupedItems.map(group=><div key={group.categoryName} className="space-y-3">
+          {groupsToRender.map(group=><div key={group.categoryName} className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-lg">{group.categoryName}</h3>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{group.items.filter(item=>item.packed).length}/{group.items.length}</p>
@@ -2860,6 +2916,7 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
 }
 
 function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;}){
+  const isMobileScreen=useMobileScreen();
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
   const [bannerMessage,setBannerMessage]=useState("");
@@ -2870,6 +2927,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const [hasUnsavedChanges,setHasUnsavedChanges]=useState(false);
   const [quickFlightNumber,setQuickFlightNumber]=useState("");
   const [quickHotelQuery,setQuickHotelQuery]=useState("");
+  const [mobileDetailSection,setMobileDetailSection]=useState<"none"|"flights"|"hotels"|"weather"|"banner">("none");
 
   useEffect(()=>{ setForm({...trip,bannerImageUrl:""}); setHasUnsavedChanges(false); },[trip]);
   useEffect(()=>{
@@ -3033,8 +3091,17 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
         </div>
       </div>
     </Card>
+    {isMobileScreen&&<Card th={th} className="p-4">
+      <Select th={th} label="More settings" value={mobileDetailSection} onChange={e=>setMobileDetailSection(e.target.value as "none"|"flights"|"hotels"|"weather"|"banner")}>
+        <option value="none">None</option>
+        <option value="flights">{t("flightLegs")}</option>
+        <option value="hotels">{t("hotelStays")}</option>
+        <option value="weather">{t("weatherLocationSettings")}</option>
+        <option value="banner">{t("bannerImage")}</option>
+      </Select>
+    </Card>}
     <div className="space-y-6">
-      <Card th={th} className="p-5 sm:p-6 space-y-4">
+      {(!isMobileScreen||mobileDetailSection==="flights")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">{t("flightLegs")}</h3>
           <Btn th={th} v="sec" type="button" onClick={()=>void addLeg()}>+ {t("addLeg")}</Btn>
@@ -3069,9 +3136,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
             <Textarea th={th} label={t("legNotes")} className="min-h-16" value={leg.notes} onChange={e=>updateLeg(leg.id,{notes:e.target.value})}/>
           </details>)}
         </div>
-      </Card>
+      </Card>}
 
-      <Card th={th} className="p-5 sm:p-6 space-y-4">
+      {(!isMobileScreen||mobileDetailSection==="hotels")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-xl font-semibold">{t("hotelStays")}</h3>
           <Btn th={th} v="sec" type="button" onClick={addHotel}>+ {t("addHotel")}</Btn>
@@ -3103,14 +3170,14 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
             <Textarea th={th} label={t("stayNotes")} value={hotel.notes} onChange={e=>updateHotel(hotel.id,{notes:e.target.value})}/>
           </details>)}
         </div>
-      </Card>
+      </Card>}
 
       <div className="grid lg:grid-cols-2 gap-4 sm:gap-6">
         <Card th={th} className="p-5 sm:p-6 space-y-4">
           <Textarea th={th} label={t("generalNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
         </Card>
 
-        <Card th={th} className="p-5 sm:p-6 space-y-4">
+        {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
           <div className="grid sm:grid-cols-3 gap-3">
             <Input th={th} label={t("locationName")} value={form.customLocation?.name||""} onChange={e=>setForm(f=>({...f,customLocation:{name:e.target.value,lat:f.customLocation?.lat||0,lon:f.customLocation?.lon||0}}))}/>
@@ -3121,17 +3188,17 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
             <Btn th={th} v="sec" type="button" onClick={()=>setForm(f=>({...f,customLocation:undefined}))}>{t("useDestination")}</Btn>
             <Btn th={th} v="ghost" type="button" onClick={()=>setForm(f=>({...f,customLocation:{name:"",lat:0,lon:0}}))}>{t("remove")}</Btn>
           </div>
-        </Card>
+        </Card>}
       </div>
     </div>
 
-    <div>
+    {(!isMobileScreen||mobileDetailSection==="banner")&&<div>
       <label className="block mb-2">{t("bannerColor")}</label>
       <input type="color" value={form.bannerColor} onChange={e=>setForm(f=>({...f,bannerColor:e.target.value}))}
         className={cx("w-full h-12 rounded-2xl border cursor-pointer",th==="dark"?"border-white/10":"border-slate-300")}/>
-    </div>
+    </div>}
 
-    <div>
+    {(!isMobileScreen||mobileDetailSection==="banner")&&<div>
       <p className="mb-2 font-medium">{t("bannerImage")}</p>
       {form.bannerImage&&<div className="mb-3 relative">
         <img src={form.bannerImage} alt="Banner" className="w-full h-40 object-cover rounded-2xl"/>
@@ -3150,7 +3217,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
           <Btn th={th} v="sec" onClick={setBannerUrl}>{t("add")}</Btn>
         </div>
       </div>
-    </div>
+    </div>}
 
     <div className="flex flex-wrap gap-2 items-center">
       <Btn th={th} onClick={save} className="!bg-emerald-500 !text-white hover:!bg-emerald-400 !shadow-lg shadow-emerald-500/30">💾 {t("save")}</Btn>
