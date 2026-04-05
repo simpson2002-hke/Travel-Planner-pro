@@ -1916,6 +1916,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
           <span>⏱️ {trip.duration} {t("days")}</span>
           <span>👥 {trip.members.length} {t("members")}</span>
           <span>🧭 {t(status)}</span>
+          <span>⏳ {tripCountdownLabel(trip.startDate, trip.endDate)}</span>
         </div>
       </div>
     </div>
@@ -2462,6 +2463,11 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     medium: "h-40 sm:h-48",
     large: "h-52 sm:h-64",
   };
+  const mediaRowClassBySize: Record<"small"|"medium"|"large", string> = {
+    small: "max-w-xs",
+    medium: "max-w-md",
+    large: "max-w-full",
+  };
   const persistItems=(nextItems:ItineraryItem[])=>onUpdate(trip.id,nextItems);
 
   const saveActivity=async(e:React.FormEvent)=>{
@@ -2605,8 +2611,14 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
-                {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className={cx("mt-3 w-full rounded-2xl border border-white/10",mediaClassBySize[it.mediaSize ?? "small"])}/>}
-                {it.photo&&<img src={it.photo} alt={it.title} className={cx("mt-4 w-full rounded-2xl border border-white/10 object-contain bg-slate-100/30",mediaClassBySize[it.mediaSize ?? "small"])}/>}
+                {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid gap-3",it.mapUrl&&it.photo?"grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
+                  {it.mapUrl&&<div className="aspect-square overflow-hidden rounded-2xl border border-white/10">
+                    <iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="h-full w-full"/>
+                  </div>}
+                  {it.photo&&<div className="aspect-square overflow-hidden rounded-2xl border border-white/10 bg-slate-100/30">
+                    <img src={it.photo} alt={it.title} className="h-full w-full object-cover"/>
+                  </div>}
+                </div>}
               </div>
               <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
@@ -3211,8 +3223,8 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   useEffect(()=>{
     setForm({...trip,bannerImageUrl:""});
     setHasUnsavedChanges(false);
-    setExpandedFlightIds((trip.flightLegs ?? []).map(leg=>leg.id));
-    setExpandedHotelIds((trip.hotels ?? []).map(hotel=>hotel.id));
+    setExpandedFlightIds([]);
+    setExpandedHotelIds([]);
     setWeatherStartDay(1);
     setWeatherEndDay(Math.max(1, trip.duration));
     setWeatherQuery("");
