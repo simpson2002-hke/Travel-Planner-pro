@@ -2586,10 +2586,6 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     if(reminderTemplate.includeNotesSummary){
       const noteTexts = trip.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
       if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
-      const attachmentLinks = trip.travelNotes.flatMap(note=>note.attachments.map(att=>`${att.name}: ${att.url}`));
-      if(attachmentLinks.length){
-        lines.push(`${t("reminderNotesLinks")}:\n${attachmentLinks.join("\n")}`);
-      }
     }
     return lines.filter(Boolean).join("\n\n");
   };
@@ -3366,11 +3362,16 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
 
   const cats=siteCfg.luggageCategories||[];
   const visibleItems=(trip.packingList ?? []).filter(item=>item.isSharedDefault || item.createdById===user.id || item.assignedTo===dn(user));
+  const categoryNames = useMemo(()=>{
+    const configured = cats.map(category=>category.name).filter(Boolean);
+    const existing = visibleItems.map(item=>item.category).filter(Boolean);
+    return Array.from(new Set([...configured, ...existing]));
+  },[cats,visibleItems]);
   const isPackedByUser = (item:PackingItem)=>Boolean(item.packedBy?.[user.id] ?? item.packedBy?.legacy ?? item.packed);
   const filteredItems=cat==="all"?visibleItems:visibleItems.filter(it=>it.category===cat);
   const packed=filteredItems.filter(it=>isPackedByUser(it)).length;
   const packedPct=filteredItems.length?Math.round((packed/filteredItems.length)*100):0;
-  const groupedItems=(cat==="all"?cats.map(c=>c.name):[cat]).map(categoryName=>({
+  const groupedItems=(cat==="all"?categoryNames:[cat]).map(categoryName=>({
     categoryName,
     items: filteredItems.filter(item=>item.category===categoryName),
   })).filter(group=>group.items.length>0);
@@ -3388,14 +3389,14 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
   const add=(e:React.FormEvent)=>{
     e.preventDefault();
     if(!newItem.trim())return;
-    const category=cat==="all"?cats[0]?.name||"Misc":cat;
+    const category=cat==="all"?cats[0]?.name||categoryNames[0]||"Misc":cat;
     onAdd(trip.id,newItem.trim(),category);
     setNewItem("");
   };
   const addShared=(e:React.FormEvent)=>{
     e.preventDefault();
     if(!newSharedItem.trim()) return;
-    const category=cat==="all"?cats[0]?.name||"Misc":cat;
+    const category=cat==="all"?cats[0]?.name||categoryNames[0]||"Misc":cat;
     onAddShared(trip.id,newSharedItem.trim(),category);
     setNewSharedItem("");
   };
@@ -3440,10 +3441,10 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
               :(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200"))}>
             {t("allCats")}
           </button>
-          {cats.map(c=><button key={c.id} onClick={()=>setCat(c.name)} className={cx("px-4 py-2 rounded-full font-medium whitespace-nowrap transition",
-            cat===c.name?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
+          {categoryNames.map(categoryName=><button key={categoryName} onClick={()=>setCat(categoryName)} className={cx("px-4 py-2 rounded-full font-medium whitespace-nowrap transition",
+            cat===categoryName?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
               :(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200"))}>
-            {c.name}
+            {categoryName}
           </button>)}
         </div>
         {isMobileScreen&&<div className="mb-4">
