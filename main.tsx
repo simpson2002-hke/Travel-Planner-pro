@@ -2599,7 +2599,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     const body = buildReminderBody();
     if(provider==="gmail"){
       const gmailUrl = buildGmailComposeUrl(to, subject, body);
-      window.open(gmailUrl,"_blank");
+      window.open(gmailUrl,"_blank","noopener,noreferrer");
     }else{
       const first = reminderRecipients[0]?.email?.trim() ?? "";
       const bcc = reminderRecipients.slice(1).map(member=>member.email.trim()).join(",");
