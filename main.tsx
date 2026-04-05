@@ -945,7 +945,18 @@ function pdfList(items:string[]){
   return items.length ? `<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<p class="muted">—</p>';
 }
 
-function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string){
+type PdfSectionId = "overview" | "flights" | "hotels" | "itinerary" | "notes" | "expenses" | "luggage";
+const PDF_SECTION_ORDER: { id: PdfSectionId; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "flights", label: "Flight details" },
+  { id: "hotels", label: "Hotel stays" },
+  { id: "itinerary", label: "Itinerary" },
+  { id: "notes", label: "Travel notes" },
+  { id: "expenses", label: "Expenses" },
+  { id: "luggage", label: "Luggage" },
+];
+
+function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string, includedSections:PdfSectionId[] = PDF_SECTION_ORDER.map(section=>section.id)){
   const itineraryByDay = Array.from({length:trip.duration}, (_,index)=>index+1).map(day=>({
     day,
     items: trip.itinerary.filter(item=>item.day===day).sort((a,b)=>a.order-b.order),
@@ -956,6 +967,7 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string){
     acc[currency] = (acc[currency] ?? 0) + expense.amount;
     return acc;
   }, {});
+  const sectionSet = new Set(includedSections);
   const html = `<!doctype html>
 <html>
   <head>
@@ -964,28 +976,29 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string){
     <style>
       :root { color-scheme: light; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 32px; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f8fafc; }
+      body { margin: 0; padding: 24px; font-family: Inter, Arial, sans-serif; color: #0f172a; background: #f8fafc; font-size: 12.5px; }
       h1,h2,h3,p { margin: 0; }
-      .hero { padding: 28px; border-radius: 24px; background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: white; }
-      .hero p { margin-top: 8px; opacity: 0.92; }
-      .section { margin-top: 22px; background: white; border: 1px solid #dbe3f0; border-radius: 20px; padding: 20px; page-break-inside: avoid; }
-      .section-title { font-size: 20px; font-weight: 800; margin-bottom: 14px; }
+      .hero { padding: 20px; border-radius: 18px; background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: white; }
+      .hero p { margin-top: 6px; opacity: 0.92; }
+      .section { margin-top: 14px; background: white; border: 1px solid #dbe3f0; border-radius: 14px; padding: 14px; page-break-inside: avoid; }
+      .section-title { font-size: 16px; font-weight: 800; margin-bottom: 10px; }
       .grid { display: grid; gap: 12px; }
       .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .tile { border: 1px solid #dbe3f0; border-radius: 16px; padding: 14px; background: #f8fafc; min-height: 88px; }
-      .label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
-      .value { font-size: 15px; line-height: 1.5; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
-      .muted { color: #64748b; font-size: 13px; }
-      .card { border: 1px solid #dbe3f0; border-radius: 18px; padding: 16px; margin-top: 12px; page-break-inside: avoid; }
+      .tile { border: 1px solid #dbe3f0; border-radius: 10px; padding: 10px; background: #f8fafc; min-height: 62px; }
+      .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
+      .value { font-size: 12px; line-height: 1.4; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
+      .muted { color: #64748b; font-size: 11px; }
+      .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 10px; page-break-inside: avoid; break-inside: avoid; }
       .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-      .route { font-size: 18px; font-weight: 800; margin-top: 6px; }
-      .pill { display: inline-block; border-radius: 999px; padding: 6px 10px; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 700; }
-      ul { margin: 10px 0 0; padding-left: 18px; }
-      li { margin-top: 6px; line-height: 1.45; }
-      .day { margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 18px; }
+      .route { font-size: 14px; font-weight: 800; margin-top: 4px; }
+      .pill { display: inline-block; border-radius: 999px; padding: 4px 8px; background: #dbeafe; color: #1d4ed8; font-size: 10px; font-weight: 700; }
+      ul { margin: 8px 0 0; padding-left: 16px; }
+      li { margin-top: 4px; line-height: 1.35; }
+      .day { margin-top: 10px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
       .day:first-of-type { margin-top: 0; border-top: 0; padding-top: 0; }
-      @media print { body { background: white; padding: 18px; } .section { break-inside: avoid; } }
+      @media print { body { background: white; padding: 14px; } .section { break-inside: avoid; } }
     </style>
   </head>
   <body>
@@ -995,7 +1008,7 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string){
       <p>${trip.members.length} ${escapeHtml(t("members"))} · ${escapeHtml(t(getTripStatus(trip)))}</p>
     </section>
 
-    <section class="section">
+    ${sectionSet.has("overview") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("overview"))}</h2>
       <div class="grid cols-3">
         <div class="tile"><div class="label">${escapeHtml(t("dates"))}</div><div class="value">${escapeHtml(fmtDate(trip.startDate))}
@@ -1003,13 +1016,14 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("flightLegs"))}</div><div class="value">${escapeHtml(String(trip.flightLegs.length || 0))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("hotelStays"))}</div><div class="value">${escapeHtml(String(trip.hotels.length || 0))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("members"))}</div><div class="value">${escapeHtml(members.map(member=>dn(member)).join(", ") || "—")}</div></div>
-        <div class="tile"><div class="label">${escapeHtml(t("generalNotes"))}</div><div class="value">${escapeHtml(trip.notes || "—")}</div></div>
+        <div class="tile"><div class="label">Countdown</div><div class="value">${escapeHtml(tripCountdownLabel(trip.startDate, trip.endDate))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("optionalPlaces"))}</div><div class="value">${escapeHtml(String(trip.optionalStops.length || 0))}</div></div>
       </div>
-    </section>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("flights") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("flightLegs"))}</h2>
+      <div class="card-grid">
       ${trip.flightLegs.length ? trip.flightLegs.map((leg,index)=>`<div class="card">
         <div class="row">
           <div>
@@ -1027,10 +1041,12 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
         </div>
         ${leg.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(leg.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
-    </section>
+      </div>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("hotels") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("hotelStays"))}</h2>
+      <div class="card-grid">
       ${trip.hotels.length ? trip.hotels.map((hotel,index)=>`<div class="card">
         <div class="row">
           <div>
@@ -1049,9 +1065,10 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
         </div>
         ${hotel.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(hotel.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
-    </section>
+      </div>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("itinerary") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("itinerary"))}</h2>
       ${itineraryByDay.map(({day, items, optionalStops})=>`<div class="day">
         <h3>${escapeHtml(t("day"))} ${day}</h3>
@@ -1072,14 +1089,14 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
           ${optionalStops.length ? pdfList(optionalStops.map(stop=>`${stop.title} (${t(stop.type === "site" ? "sight" : stop.type === "restaurant" ? "restaurant" : "other")})${stop.location ? ` — ${stop.location}` : ""}${stop.notes ? ` • ${stop.notes}` : ""}${stop.url ? ` • ${stop.url}` : ""}`)) : `<p class="muted">${escapeHtml(t("noOptionalPlacesDesc"))}</p>`}
         </div>
       </div>`).join("")}
-    </section>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("notes") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("travelNotes"))}</h2>
       ${trip.travelNotes.length ? pdfList(trip.travelNotes.map(note=>`${note.authorName} — ${new Date(note.createdAt).toLocaleString()}${note.text ? ` • ${note.text}` : ""}`)) : `<p class="muted">${escapeHtml(t("noNotesDesc"))}</p>`}
-    </section>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("expenses") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("expenses"))}</h2>
       <div class="grid cols-2">
         <div class="tile"><div class="label">${escapeHtml(t("totalSpent"))}</div><div class="value">${Object.keys(expenseTotalsByCurrency).length
@@ -1088,12 +1105,12 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("members"))}</div><div class="value">${escapeHtml(String(trip.members.length))}</div></div>
       </div>
       ${trip.expenses.length ? pdfList(trip.expenses.map(expense=>`${fmtDate(expense.date)} • ${expense.title} • ${fmtCur(expense.amount, expense.currency)} • ${expense.category}`)) : `<p class="muted" style="margin-top:12px">${escapeHtml(t("noExpensesDesc"))}</p>`}
-    </section>
+    </section>` : ""}
 
-    <section class="section">
+    ${sectionSet.has("luggage") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("luggage"))}</h2>
       ${trip.packingList.length ? pdfList(trip.packingList.map(item=>`${item.label} (${item.category})${Object.values(item.packedBy ?? {}).some(Boolean) ? " ✓" : ""}`)) : `<p class="muted">${escapeHtml(t("noLuggageDesc"))}</p>`}
-    </section>
+    </section>` : ""}
   </body>
 </html>`;
 
@@ -1437,7 +1454,7 @@ function Input(p:InputHTMLAttributes<HTMLInputElement>&{label?:string;th:ThemeMo
 
 function Select(p:SelectHTMLAttributes<HTMLSelectElement>&{label?:string;th:ThemeMode;children:ReactNode}){
   const{label,th,className,children,...rest}=p;
-  const f=<select {...rest} className={cx("w-full rounded-2xl border px-4 py-3 outline-none transition",
+  const f=<select {...rest} className={cx("tp-select w-full rounded-2xl border px-4 py-3 outline-none transition shadow-sm",
     th==="dark"?"border-white/10 bg-slate-900 text-white focus:border-cyan-400/60":"border-slate-300 bg-white text-slate-900 focus:border-blue-500",className)}>{children}</select>;
   if(!label)return f;
   return <label className="flex flex-col gap-2"><span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>{f}</label>;
@@ -1887,6 +1904,9 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
         📍 {trip.location} · {fmtDate(trip.startDate)} – {fmtDate(trip.endDate)}
       </p>
       <p className={cx("text-sm font-semibold",status==="upcoming"?(th==="dark"?"text-amber-300":"text-amber-700"):status==="past"?(th==="dark"?"text-slate-400":"text-slate-600"):"text-cyan-400")}>{t("status")}: {t(status)}</p>
+      <p className={cx("text-sm font-medium",th==="dark"?"text-cyan-300":"text-blue-700")}>
+        ⏳ {tripCountdownLabel(trip.startDate, trip.endDate)}
+      </p>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
         👥 {trip.members.length} {t("members")} · {trip.duration} {t("days")}
       </p>
@@ -1978,8 +1998,18 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
   const [urlInput,setUrlInput]=useState("");
   const [editingNoteId,setEditingNoteId]=useState<string|null>(null);
   const [editingNoteText,setEditingNoteText]=useState("");
+  const [showPdfModal,setShowPdfModal]=useState(false);
+  const [pdfSections,setPdfSections]=useState<PdfSectionId[]>(()=>PDF_SECTION_ORDER.map(section=>section.id));
 
   const memberProfiles=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
+  const togglePdfSection = (sectionId: PdfSectionId)=>{
+    setPdfSections(current=>current.includes(sectionId) ? current.filter(id=>id!==sectionId) : [...current,sectionId]);
+  };
+  const runPdfExport = ()=>{
+    const sections: PdfSectionId[] = pdfSections.length ? pdfSections : ["overview"];
+    exportTripToPdf(trip, memberProfiles, t, sections);
+    setShowPdfModal(false);
+  };
   const flightLegs=trip.flightLegs.length>0?trip.flightLegs:[{
     id:"legacy-flight",airline:trip.airline,flightNumber:trip.flightNumber,departureAirport:trip.departureAirport,arrivalAirport:trip.arrivalAirport,
     departureTime:trip.departureTime,arrivalTime:trip.arrivalTime,terminal:trip.terminal,bookingReference:trip.bookingReference,notes:"",
@@ -2106,7 +2136,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <div className="flex flex-wrap items-center gap-3">
               <Badge label={`${t("status")}: ${t(status)}`} th={th} color={getStatusColor(status)}/>
               <Badge label={`${trip.duration} ${t("days")}`} th={th} color="blue"/>
-              <Btn th={th} v="sec" sz="sm" onClick={()=>exportTripToPdf(trip, memberProfiles, t)}>🧾 {t("exportPdf")}</Btn>
+              <Btn th={th} v="sec" sz="sm" onClick={()=>setShowPdfModal(true)}>🧾 {t("exportPdf")}</Btn>
             </div>
             <div>
               <p className={cx("text-sm uppercase tracking-[0.22em] mb-3",th==="dark"?"text-cyan-300":"text-blue-700")}>{t("overview")}</p>
@@ -2328,6 +2358,27 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
         </div>
       </>}
     </Card>}
+
+    <Modal open={showPdfModal} onClose={()=>setShowPdfModal(false)} th={th} title={t("exportPdf")}>
+      <div className="space-y-4">
+        <p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>Choose which sections to include in the PDF.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {PDF_SECTION_ORDER.map(section=><label key={section.id} className={cx("flex items-center gap-2 rounded-xl border px-3 py-2 text-sm",
+            th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+            <input type="checkbox" checked={pdfSections.includes(section.id)} onChange={()=>togglePdfSection(section.id)} />
+            <span>{section.label}</span>
+          </label>)}
+        </div>
+        <div className="flex items-center justify-between">
+          <Btn th={th} v="ghost" sz="sm" onClick={()=>setPdfSections(PDF_SECTION_ORDER.map(section=>section.id))}>Select all</Btn>
+          <Btn th={th} v="ghost" sz="sm" onClick={()=>setPdfSections([])}>Clear</Btn>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Btn th={th} v="sec" onClick={()=>setShowPdfModal(false)}>{t("cancel")}</Btn>
+          <Btn th={th} onClick={runPdfExport}>🧾 {t("exportPdf")}</Btn>
+        </div>
+      </div>
+    </Modal>
 
     <Modal open={showCustomLoc} onClose={()=>setShowCustomLoc(false)} th={th} title={t("customLocation")}>
       <div className="space-y-4">
@@ -2624,12 +2675,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="font-semibold">Split timeline by traveler</p>
-            <select value={travelerView} onChange={e=>setTravelerView(e.target.value)} className={cx("rounded-xl border px-3 py-2 text-sm",th==="dark"?"border-white/10 bg-white/5":"border-slate-300 bg-white")}>
+            <Select th={th} value={travelerView} onChange={e=>setTravelerView(e.target.value)} className="max-w-[220px] !rounded-xl !px-3 !py-2 text-sm">
               {trip.members.map(memberId=>{
                 const traveler=profileMap.get(memberId);
                 return <option key={memberId} value={memberId}>{traveler?dn(traveler):memberId}</option>;
               })}
-            </select>
+            </Select>
           </div>
           <div className="space-y-2 text-sm">
             {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>No activities for this traveler on Day {day}.</p>
@@ -3574,10 +3625,6 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
       </Card>}
 
       <div className="grid lg:grid-cols-2 gap-4 sm:gap-6">
-        <Card th={th} className="p-5 sm:p-6 space-y-4">
-          <Textarea th={th} label={t("generalNotes")} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}/>
-        </Card>
-
         {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>

@@ -32,6 +32,16 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 #root { min-height: 100vh; }
 
+.tp-select option {
+  color: #0f172a;
+  background: #ffffff;
+}
+
+:root[data-theme="dark"] .tp-select option {
+  color: #f8fafc;
+  background: #0f172a;
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(100,100,120,.35); border-radius: 99px; }
