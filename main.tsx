@@ -2583,8 +2583,9 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   };
 
   const sendReminderEmail=()=>{
-    const recipients = members
-      .filter(member=>Boolean(member.email?.trim()))
+    const recipients = trip.members
+      .map(id=>profiles.find(profile=>profile.id===id))
+      .filter((member):member is Profile=>Boolean(member?.email?.trim()))
       .map(member=>member.email.trim());
     if(recipients.length===0) return;
     setSendingReminder(true);
@@ -2702,11 +2703,11 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
           </label>)}
         </div>
         <div className="flex flex-wrap gap-2 items-center">
-          <Btn th={th} sz="sm" onClick={()=>sendReminderEmail()} disabled={!canManageReminder||sendingReminder||members.every(member=>!member.email?.trim())}>
+          <Btn th={th} sz="sm" onClick={()=>sendReminderEmail()} disabled={!canManageReminder||sendingReminder}>
             {sendingReminder ? "Preparing..." : "Send reminder draft"}
           </Btn>
-          <p className={cx("text-xs",th==="dark"?"text-cyan-300":"text-blue-700")}>
-            {members.filter(member=>member.email?.trim()).map(member=>member.email.trim()).join(", ") || t("none")}
+          <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+            Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
           </p>
         </div>
       </div>}
