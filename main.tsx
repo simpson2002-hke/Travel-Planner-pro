@@ -2739,6 +2739,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalForm,setOptionalForm]=useState(emptyOptionalForm);
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
+  const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
     : canEdit;
@@ -2808,11 +2809,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     persistItems(sortItineraryByDayAndTime(next));
   };
 
-  const swapDaySchedule=()=>{
+  const swapDaySchedule=(targetDay:number)=>{
     if(!canEdit || trip.duration < 2) return;
-    const raw = window.prompt(`Swap Day ${day} with which day? (1-${trip.duration})`, day===1 ? "2" : "1");
-    if(raw===null) return;
-    const targetDay = Number(raw);
     if(!Number.isInteger(targetDay) || targetDay < 1 || targetDay > trip.duration || targetDay===day){
       window.alert(`Please enter a valid day number between 1 and ${trip.duration}, excluding Day ${day}.`);
       return;
@@ -2893,6 +2891,15 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   useEffect(()=>{
     setOptionalForm(current=>current.day===day?current:{...current,day});
   },[day]);
+  useEffect(()=>{
+    if(trip.duration < 2){
+      setSwapTargetDay(1);
+      return;
+    }
+    if(swapTargetDay===day || swapTargetDay>trip.duration){
+      setSwapTargetDay(day===1 ? 2 : 1);
+    }
+  },[day,swapTargetDay,trip.duration]);
 
   return <div className="grid min-w-0 gap-6 lg:grid-cols-[1.45fr_.95fr]">
     <div className="space-y-5">
@@ -2909,14 +2916,25 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
         </div>
-        <div className="mb-6">
-          <button
-            onClick={swapDaySchedule}
-            disabled={!canEdit || trip.duration < 2}
-            className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
-          >
-            🔁 Swap Day {day} with another day
-          </button>
+        <div className={cx("mb-6 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+          <p className="text-sm font-semibold">🔁 Swap this day itinerary</p>
+          <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+            You are viewing Day {day}. Choose another day to switch all activities.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <Select th={th} label="Swap with" value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full sm:max-w-[220px]">
+              {Array.from({length:trip.duration},(_,i)=>i+1)
+                .filter(d=>d!==day)
+                .map(d=><option key={`swap-${d}`} value={d}>{t("day")} {d}</option>)}
+            </Select>
+            <button
+              onClick={()=>swapDaySchedule(swapTargetDay)}
+              disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
+              className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition sm:mb-[1px]",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
+            >
+              Swap Day {day} ↔ Day {swapTargetDay}
+            </button>
+          </div>
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
