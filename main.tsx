@@ -60,6 +60,7 @@ type TransitLeg = { duration: string; details: string; };
 type ItineraryItem = {
   id: string; day: number; order: number; startTime: string; endTime: string; endDayOffset?: number; title: string; stopLocation: string; transport: string; details: string;
   photo?: string; mapUrl?: string; transitToNext?: TransitLeg; activityType?: "regular" | "free-time";
+  needsFollowUp?: boolean; followUpNote?: string;
   mediaSize?: "small" | "medium" | "large";
   freeTimeOwnerId?: string;
   freeTimeParticipantIds?: string[];
@@ -868,6 +869,8 @@ function normTrip(i:unknown):Trip{
       stopLocation: (item as ItineraryItem).stopLocation ?? "",
       photo: (item as ItineraryItem).photo ?? "",
       mapUrl: (item as ItineraryItem).mapUrl ?? "",
+      needsFollowUp: Boolean((item as ItineraryItem).needsFollowUp),
+      followUpNote: (item as ItineraryItem).followUpNote ?? "",
       mediaSize: (item as ItineraryItem).mediaSize ?? "small",
       transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" },
       activityType: (item as ItineraryItem).activityType
@@ -1582,10 +1585,11 @@ function Avatar({name,th,icon,iconImage}:{name:string;th:ThemeMode;icon?:string;
 }
 
 function AvatarPicker({th,label,emojiValue,imageValue,onEmojiChange,onImageChange}:{th:ThemeMode;label:string;emojiValue:string;imageValue?:string;onEmojiChange:(value:string)=>void;onImageChange:(value:string)=>void}){
+  const [avatarSize,setAvatarSize]=useState(320);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file = e.target.files?.[0];
     if(!file) return;
-    const resized = await readImageFile(file,{maxDimension:320,maxBytes:110_000});
+    const resized = await readImageFile(file,{maxDimension:avatarSize,maxBytes:110_000});
     onImageChange(resized);
     e.target.value = "";
   };
@@ -1605,6 +1609,11 @@ function AvatarPicker({th,label,emojiValue,imageValue,onEmojiChange,onImageChang
       </label>
       {imageValue?.trim()&&<button type="button" onClick={()=>onImageChange("")} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-rose-500/15 text-rose-300":"bg-rose-50 text-rose-600")}>Remove image</button>}
     </div>
+    <label className="flex items-center gap-3 text-sm">
+      <span className={th==="dark"?"text-slate-400":"text-slate-600"}>Resize</span>
+      <input type="range" min={96} max={512} step={16} value={avatarSize} onChange={e=>setAvatarSize(Number(e.target.value)||320)} className="flex-1"/>
+      <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{avatarSize}px</span>
+    </label>
     {(emojiValue || imageValue) && <div className="flex items-center gap-3">
       <Avatar name="Preview User" icon={emojiValue} iconImage={imageValue} th={th}/>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Preview</p>
@@ -2507,11 +2516,24 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
 function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Profile;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onUpdateTrip:(id:string,d:Partial<Trip>)=>void}){
   const members=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
   const isOwner=trip.ownerId===user.id;
+  const canManageReminder = canEditSettings(getTripRole(trip,user.id));
   const isMobileScreen=useMobileScreen();
   const [selectedMemberId,setSelectedMemberId]=useState(members[0]?.id ?? "");
+  const [reminderOpen,setReminderOpen]=useState(false);
+  const [recipientIds,setRecipientIds]=useState<string[]>(()=>{
+    const withEmails = members.filter(member=>member.email?.trim()).map(member=>member.id);
+    return withEmails;
+  });
+  const [sendingVia,setSendingVia]=useState<"default"|"gmail"|null>(null);
+  const reminderTemplate = normalizeReminderTemplate(trip.reminderTemplate);
+  const reminderRecipients = members.filter(member=>recipientIds.includes(member.id) && member.email?.trim());
   const setRole=(memberId:string,role:TripRole)=>{
     if(!isOwner || memberId===trip.ownerId) return;
     onUpdateTrip(trip.id,{memberRoles:{...(trip.memberRoles ?? {}),[memberId]:role}});
+  };
+  const updateReminderTemplate=(patch:Partial<ReminderTemplate>)=>{
+    if(!canManageReminder) return;
+    onUpdateTrip(trip.id,{reminderTemplate:{...normalizeReminderTemplate(trip.reminderTemplate),...patch}});
   };
 
   const memberStats=members.map(member=>{
@@ -2526,6 +2548,54 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
       setSelectedMemberId(memberStats[0]?.member.id ?? "");
     }
   },[memberStats,selectedMemberId]);
+  useEffect(()=>{
+    const validIds = new Set(members.filter(member=>member.email?.trim()).map(member=>member.id));
+    setRecipientIds(current=>{
+      const kept = current.filter(id=>validIds.has(id));
+      if(kept.length>0) return kept;
+      return [...validIds];
+    });
+  },[members]);
+
+  const buildReminderBody=()=>{
+    const lines:string[]=[reminderTemplate.body.trim()];
+    if(reminderTemplate.includeTripTitle) lines.push(`${t("reminderTripTitle")}: ${trip.title}`);
+    if(reminderTemplate.includeDates) lines.push(`${t("reminderTripDates")}: ${fmtDate(trip.startDate)} - ${fmtDate(trip.endDate)}`);
+    if(reminderTemplate.includeLocation) lines.push(`${t("reminderLocation")}: ${trip.location || "—"}`);
+    if(reminderTemplate.includeTripId) lines.push(`${t("reminderTripId")}: ${trip.id}`);
+    if(reminderTemplate.includeFlightSummary){
+      lines.push(`${t("reminderFlightSummary")}: ${tripFlightSummary(trip).join(" · ") || t("none")}`);
+    }
+    if(reminderTemplate.includeHotelSummary){
+      lines.push(`${t("reminderHotelSummary")}: ${tripHotelSummary(trip).join(" · ") || t("none")}`);
+    }
+    if(reminderTemplate.includeNotesSummary){
+      const noteTexts = trip.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
+      if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
+      const attachmentLinks = trip.travelNotes.flatMap(note=>note.attachments.map(att=>`${att.name}: ${att.url}`));
+      if(attachmentLinks.length){
+        lines.push(`${t("reminderNotesLinks")}:\n${attachmentLinks.join("\n")}`);
+      }
+    }
+    return lines.filter(Boolean).join("\n\n");
+  };
+
+  const sendReminder=(provider:"default"|"gmail")=>{
+    if(reminderRecipients.length===0) return;
+    setSendingVia(provider);
+    const to = reminderRecipients.map(member=>member.email.trim()).join(",");
+    const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",trip.title);
+    const body = buildReminderBody();
+    if(provider==="gmail"){
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(gmailUrl,"_blank");
+    }else{
+      const first = reminderRecipients[0]?.email?.trim() ?? "";
+      const bcc = reminderRecipients.slice(1).map(member=>member.email.trim()).join(",");
+      window.open(`mailto:${first}?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,"_blank");
+    }
+    setTimeout(()=>setSendingVia(null),500);
+  };
   const visibleMemberStats=isMobileScreen
     ? memberStats.filter(item=>item.member.id===selectedMemberId)
     : memberStats;
@@ -2607,12 +2677,59 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
         </div>}
       </Card>)}
     </div>
+
+    <Card th={th} className="p-5 sm:p-6">
+      <button type="button" onClick={()=>setReminderOpen(v=>!v)} className={cx("w-full flex items-center justify-between rounded-2xl px-4 py-3 text-left font-semibold",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
+        <span>📧 {t("reminderEmailCard")}</span>
+        <span>{reminderOpen ? "−" : "+"}</span>
+      </button>
+      {reminderOpen&&<div className="mt-4 space-y-4">
+        <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
+          {t("reminderEmailHint")}
+        </p>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {members.map(member=><label key={`rem-${member.id}`} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+            <input
+              type="checkbox"
+              checked={recipientIds.includes(member.id)}
+              disabled={!member.email?.trim() || !canManageReminder}
+              onChange={e=>setRecipientIds(current=>e.target.checked?[...new Set([...current,member.id])]:current.filter(id=>id!==member.id))}
+            />
+            <span className={cx(!member.email?.trim()&&"opacity-50")}>{dn(member)} {member.email?`(${member.email})`:`(${t("noEmail")})`}</span>
+          </label>)}
+        </div>
+        <Input th={th} label={t("subjectTemplate")} value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})} disabled={!canManageReminder}/>
+        <Textarea th={th} label={t("emailBodyTemplate")} value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28" disabled={!canManageReminder}/>
+        <div className="grid sm:grid-cols-2 gap-2 text-sm">
+          {[
+            [t("reminderTripTitle"),"includeTripTitle"],
+            [t("reminderTripDates"),"includeDates"],
+            [t("reminderLocation"),"includeLocation"],
+            [t("reminderTripId"),"includeTripId"],
+            [t("reminderFlightSummary"),"includeFlightSummary"],
+            [t("reminderHotelSummary"),"includeHotelSummary"],
+            [t("reminderNotesLinks"),"includeNotesSummary"],
+          ].map(([label,key])=><label key={key} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+            <input type="checkbox" checked={Boolean(reminderTemplate[key as keyof ReminderTemplate])} disabled={!canManageReminder} onChange={e=>updateReminderTemplate({[key]:e.target.checked} as Partial<ReminderTemplate>)}/>
+            {label}
+          </label>)}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Btn th={th} v="sec" sz="sm" onClick={()=>sendReminder("default")} disabled={!canManageReminder||recipientIds.length===0||Boolean(sendingVia)}>
+            {sendingVia==="default"?t("opening"):t("openDefaultDraft")}
+          </Btn>
+          <Btn th={th} sz="sm" onClick={()=>sendReminder("gmail")} disabled={!canManageReminder||recipientIds.length===0||Boolean(sendingVia)}>
+            {sendingVia==="gmail"?t("opening"):t("openGmailDraft")}
+          </Btn>
+        </div>
+      </div>}
+    </Card>
   </div>;
 }
 
 function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;canEditFreeTime:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
   const TRANSPORT_OPTIONS = ["Flight","Train","Bus","Taxi","Rental Car","Walk","Ferry","Metro","Other"] as const;
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",transportType:"Flight",customTransport:"",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,mediaSize:"small" as "small"|"medium"|"large",freeTimeParticipantIds:[] as string[]};
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",transportType:"Flight",customTransport:"",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,mediaSize:"small" as "small"|"medium"|"large",freeTimeParticipantIds:[] as string[],needsFollowUp:false,followUpNote:""};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
     { value:"transport", label:t("transport") },
@@ -2665,6 +2782,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       mediaSize: form.mediaSize,
       mapUrl:form.mapUrl||googleMapEmbedUrl(form.stopLocation),
       activityType:form.activityType,
+      needsFollowUp: form.needsFollowUp,
+      followUpNote: form.followUpNote.trim(),
       freeTimeOwnerId: form.activityType==="free-time" ? (editId ? trip.itinerary.find(it=>it.id===editId)?.freeTimeOwnerId || user.id : user.id) : "",
       freeTimeParticipantIds: form.activityType==="free-time" ? form.freeTimeParticipantIds : [],
     };
@@ -2711,7 +2830,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         ? "free-time"
         : (it.transport && it.transport!=="Activity" ? "transport" : "regular"));
     const matchedTransport = TRANSPORT_OPTIONS.find(option=>option.toLowerCase()===(it.transport || "").toLowerCase());
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,transportType:matchedTransport ?? "Other",customTransport:matchedTransport ? "" : (inferredType==="transport" ? (it.transport||"") : ""),details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:inferredType,timeMode:mode,dayCount:(it.endDayOffset??0)+1,mediaSize:it.mediaSize??"small",freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,transportType:matchedTransport ?? "Other",customTransport:matchedTransport ? "" : (inferredType==="transport" ? (it.transport||"") : ""),details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:inferredType,timeMode:mode,dayCount:(it.endDayOffset??0)+1,mediaSize:it.mediaSize??"small",freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])],needsFollowUp:Boolean(it.needsFollowUp),followUpNote:it.followUpNote??"" });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2796,11 +2915,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <Tabs tabs={[{id:"schedule",label:t("itinerarySchedule"),icon:"🗓️"},{id:"saved",label:t("optionalPlaces"),icon:"📌"}]} active={activePane} onChange={setActivePane} th={th}/>
 
         {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative">
-          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"")}>
+          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
             <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1 min-w-0">
-                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
+                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.needsFollowUp?`“${it.title}”`:it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
+                {it.needsFollowUp&&<p className={cx("mb-2 rounded-xl border px-3 py-2 text-sm font-semibold",th==="dark"?"border-amber-200/40 bg-amber-300/10 text-amber-200":"border-amber-300 bg-amber-100 text-amber-800")}>⚠️ {t("followUpBadge")} {it.followUpNote ? `— “${it.followUpNote}”` : ""}</p>}
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
@@ -2920,6 +3040,11 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {form.photo&&<img src={form.photo} alt="preview" className={cx("w-full rounded-2xl border border-white/10 object-contain bg-slate-100/30",mediaClassBySize[form.mediaSize])}/>}
         </div>
         <Textarea th={th} label={t("remarks")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
+        <label className={cx("flex items-center gap-2 rounded-xl border px-3 py-2 text-sm",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          <input type="checkbox" checked={form.needsFollowUp} onChange={e=>setForm(f=>({...f,needsFollowUp:e.target.checked,followUpNote:e.target.checked?f.followUpNote:""}))}/>
+          {t("needFollowUp")}
+        </label>
+        {form.needsFollowUp&&<Input th={th} label={t("followUpNote")} placeholder={t("followUpPlaceholder")} value={form.followUpNote} onChange={e=>setForm(f=>({...f,followUpNote:e.target.value}))}/>}
         <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
         {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
@@ -3440,55 +3565,6 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     setHasUnsavedChanges(current!==baseline);
   },[form,trip]);
 
-  const ownerOrEditors = useMemo(()=>{
-    return trip.members
-      .map(id=>profiles.find(profile=>profile.id===id))
-      .filter(Boolean)
-      .filter(member=>{
-        const role = getTripRole(trip,(member as Profile).id);
-        return role==="owner" || role==="editor";
-      }) as Profile[];
-  },[trip,profiles]);
-
-  const reminderTemplate = normalizeReminderTemplate(form.reminderTemplate);
-
-  const buildReminderDraft = ()=>{
-    const lines:string[] = [reminderTemplate.body.trim()];
-    if(reminderTemplate.includeTripTitle) lines.push(`Trip: ${trip.title}`);
-    if(reminderTemplate.includeDates) lines.push(`Dates: ${fmtDate(trip.startDate)} - ${fmtDate(trip.endDate)}`);
-    if(reminderTemplate.includeLocation) lines.push(`Location: ${trip.location || "—"}`);
-    if(reminderTemplate.includeTripId) lines.push(`Trip ID: ${trip.id}`);
-    if(reminderTemplate.includeFlightSummary){
-      const summary = tripFlightSummary(trip).join(" · ");
-      lines.push(`Flights: ${summary || "Not set"}`);
-    }
-    if(reminderTemplate.includeHotelSummary){
-      const summary = tripHotelSummary(trip).join(" · ");
-      lines.push(`Hotels: ${summary || "Not set"}`);
-    }
-    if(reminderTemplate.includeNotesSummary && trip.travelNotes.length){
-      lines.push(`Notes: ${trip.travelNotes.slice(0,3).map(note=>note.text || "(attachment)").join(" | ")}`);
-    }
-    return {
-      subject: reminderTemplate.subject.replaceAll("{tripTitle}",trip.title).trim() || `Trip reminder: ${trip.title}`,
-      body: lines.filter(Boolean).join("\n\n"),
-    };
-  };
-
-  const sendReminderEmail = async()=>{
-    setSendingReminder(true);
-    try{
-      const draft = buildReminderDraft();
-      const recipients = trip.members
-        .map(id=>profiles.find(profile=>profile.id===id)?.email?.trim())
-        .filter((email):email is string=>Boolean(email));
-      const senderHint = ownerOrEditors.map(person=>person.email).filter(Boolean).join(", ");
-      const mailto = `mailto:${recipients[0] ?? ""}?bcc=${encodeURIComponent(recipients.slice(1).join(","))}&subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(`${draft.body}\n\nSender options (owner/editor): ${senderHint}`)}`;
-      window.open(mailto,"_blank");
-    }finally{
-      setSendingReminder(false);
-    }
-  };
 
   const save=()=>{
     const shouldKeepCustom=Boolean(form.customLocation?.name?.trim()) && Number.isFinite(form.customLocation?.lat) && Number.isFinite(form.customLocation?.lon) && !(form.customLocation?.lat===0 && form.customLocation?.lon===0 && !form.customLocation?.name.trim());
