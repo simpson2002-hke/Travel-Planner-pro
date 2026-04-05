@@ -18,6 +18,7 @@ type Profile = {
   id: string; accountName: string; firstName: string; lastName: string;
   email: string; phone: string; password: string;
   icon?: string;
+  iconImage?: string;
   dateOfBirth?: string;
   nationality?: string; passportNumber?: string; passportExpiryDate?: string; dietaryNotes?: string;
   emergencyContact?: string; homeAirport?: string;
@@ -75,6 +76,17 @@ type FreeTimeEntry = {
 };
 
 type TripRole = "owner" | "editor" | "viewer";
+type ReminderTemplate = {
+  subject: string;
+  body: string;
+  includeTripTitle: boolean;
+  includeDates: boolean;
+  includeLocation: boolean;
+  includeTripId: boolean;
+  includeHotelSummary: boolean;
+  includeFlightSummary: boolean;
+  includeNotesSummary: boolean;
+};
 
 type Trip = {
   id: string; ownerId: string; ownerName: string; title: string; location: string;
@@ -91,6 +103,7 @@ type Trip = {
   itineraryChecklists: Record<string, Record<string, boolean>>;
   packingList: PackingItem[]; itinerary: ItineraryItem[]; optionalStops: OptionalStop[];
   freeTimeEntries: FreeTimeEntry[];
+  reminderTemplate?: ReminderTemplate;
   createdAt: string;
   customLocation?: {name:string;lat:number;lon:number};
   weatherLocations?: { id: string; label: string; startDay: number; endDay: number; location: GeoPoint }[];
@@ -172,6 +185,18 @@ const HERO_IMAGES = [
   "https://images.unsplash.com/photo-1530789253388-582c481c54b0?w=1600&q=80",
   "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=1600&q=80",
 ];
+const AVATAR_EMOJI_OPTIONS = ["😀","😎","🧳","✈️","🌍","🏝️","🏔️","📸","🧭","🗺️","🍜","🏖️"];
+const DEFAULT_REMINDER_TEMPLATE: ReminderTemplate = {
+  subject: "Trip reminder: {tripTitle}",
+  body: "Hi travellers,\n\nThis is a reminder for our upcoming trip.\n\nSafe travels!",
+  includeTripTitle: true,
+  includeDates: true,
+  includeLocation: true,
+  includeTripId: true,
+  includeHotelSummary: true,
+  includeFlightSummary: true,
+  includeNotesSummary: false,
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    HELPERS
@@ -232,6 +257,10 @@ const hasTimeOverlap=(candidate:Pick<ItineraryItem,"startTime"|"endTime"|"endDay
   const absEndB = (existing.endDayOffset ?? 0) * 1440 + endB;
   return absStartA < absEndB && absStartB < absEndA;
 };
+const normalizeReminderTemplate = (template?:Partial<ReminderTemplate>):ReminderTemplate=>({
+  ...DEFAULT_REMINDER_TEMPLATE,
+  ...template,
+});
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -718,7 +747,14 @@ function useSharedPersist<T>(key:string,init:T){
 
 function useT(lang:Language){ return (k:TKey)=>translations[lang][k]; }
 
-function copyText(v:string){ navigator.clipboard?.writeText(v).catch(()=>{}); }
+async function copyText(v:string){
+  try{
+    await navigator.clipboard?.writeText(v);
+    return true;
+  }catch{
+    return false;
+  }
+}
 
 function buildUrl(tpl:string,rep:Record<string,string|number>){
   return Object.entries(rep).reduce((c,[k,v])=>c.split(`{${k}}`).join(k==="query"?encodeURIComponent(String(v)):String(v)),tpl);
@@ -729,6 +765,7 @@ function normProfile(i:unknown):Profile{
   return { id:p.id??uid("u"), accountName:upper(p.accountName??""), firstName:normalizeName(p.firstName??""),
     lastName:normalizeName(p.lastName??""), email:p.email??"", phone:p.phone??"", password:p.password??"", dateOfBirth:p.dateOfBirth??"",
     icon:p.icon??"",
+    iconImage:p.iconImage??"",
     nationality:p.nationality??"", passportNumber:p.passportNumber??"", passportExpiryDate:p.passportExpiryDate??"",
     dietaryNotes:p.dietaryNotes??"", emergencyContact:p.emergencyContact??"", homeAirport:normalizeAirport(p.homeAirport??"HKG")||"HKG" };
 }
@@ -857,6 +894,7 @@ function normTrip(i:unknown):Trip{
       notes: entry.notes ?? "",
     })) : [],
     createdAt:t.createdAt??new Date().toISOString(),
+    reminderTemplate: normalizeReminderTemplate((t as Partial<Trip>).reminderTemplate),
     customLocation:t.customLocation,
     weatherLocations: Array.isArray((t as Partial<Trip>).weatherLocations)
       ? (t as Partial<Trip>).weatherLocations!
@@ -1451,7 +1489,7 @@ async function searchHotelByQuery(siteCfg:SiteSettings,hotelName:string,location
    ═══════════════════════════════════════════════════════════════════════════════ */
 function Input(p:InputHTMLAttributes<HTMLInputElement>&{label?:string;th:ThemeMode}){
   const{label,th,className,...rest}=p;
-  const f=<input {...rest} className={cx("w-full rounded-2xl border px-4 py-3 outline-none transition placeholder:opacity-50",
+  const f=<input {...rest} className={cx("w-full max-w-full min-w-0 rounded-2xl border px-4 py-3 outline-none transition placeholder:opacity-50",
     th==="dark"?"border-white/10 bg-white/5 text-white focus:border-cyan-400/60":"border-slate-300 bg-white text-slate-900 focus:border-blue-500",className)}/>;
   if(!label)return f;
   return <label className="flex flex-col gap-2"><span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>{f}</label>;
@@ -1459,7 +1497,7 @@ function Input(p:InputHTMLAttributes<HTMLInputElement>&{label?:string;th:ThemeMo
 
 function Select(p:SelectHTMLAttributes<HTMLSelectElement>&{label?:string;th:ThemeMode;children:ReactNode}){
   const{label,th,className,children,...rest}=p;
-  const f=<select {...rest} className={cx("tp-select w-full rounded-2xl border px-4 py-3 outline-none transition shadow-sm",
+  const f=<select {...rest} className={cx("tp-select w-full max-w-full min-w-0 rounded-2xl border px-4 py-3 outline-none transition shadow-sm",
     th==="dark"?"border-white/10 bg-slate-900 text-white focus:border-cyan-400/60":"border-slate-300 bg-white text-slate-900 focus:border-blue-500",className)}>{children}</select>;
   if(!label)return f;
   return <label className="flex flex-col gap-2"><span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>{f}</label>;
@@ -1467,7 +1505,7 @@ function Select(p:SelectHTMLAttributes<HTMLSelectElement>&{label?:string;th:Them
 
 function Textarea(p:TextareaHTMLAttributes<HTMLTextAreaElement>&{label?:string;th:ThemeMode}){
   const{label,th,className,...rest}=p;
-  const f=<textarea {...rest} className={cx("w-full rounded-2xl border px-4 py-3 outline-none transition placeholder:opacity-50 min-h-24 resize-none",
+  const f=<textarea {...rest} className={cx("w-full max-w-full min-w-0 rounded-2xl border px-4 py-3 outline-none transition placeholder:opacity-50 min-h-24 resize-none",
     th==="dark"?"border-white/10 bg-white/5 text-white focus:border-cyan-400/60":"border-slate-300 bg-white text-slate-900 focus:border-blue-500",className)}/>;
   if(!label)return f;
   return <label className="flex flex-col gap-2"><span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>{f}</label>;
@@ -1475,7 +1513,7 @@ function Textarea(p:TextareaHTMLAttributes<HTMLTextAreaElement>&{label?:string;t
 
 function Btn(p:ButtonHTMLAttributes<HTMLButtonElement>&{th:ThemeMode;v?:"pri"|"sec"|"ghost"|"danger";sz?:"sm"|"md"}){
   const{th,v="pri",sz="md",className,...rest}=p;
-  return <button {...rest} className={cx("rounded-full font-medium transition disabled:opacity-40 whitespace-nowrap",
+  return <button {...rest} className={cx("rounded-full font-medium transition disabled:opacity-40 whitespace-nowrap active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400/70",
     sz==="sm"?"px-4 py-2 text-sm":"px-6 py-3",
     v==="pri"&&(th==="dark"?"bg-cyan-400 text-slate-950 hover:bg-cyan-300":"bg-slate-800 text-white hover:bg-slate-700"),
     v==="sec"&&(th==="dark"?"border border-white/15 bg-white/5 text-white hover:bg-white/10":"border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"),
@@ -1533,10 +1571,45 @@ function Empty({icon,title,desc,th}:{icon:string;title:string;desc:string;th:The
   </div>;
 }
 
-function Avatar({name,th,icon}:{name:string;th:ThemeMode;icon?:string}){
+function Avatar({name,th,icon,iconImage}:{name:string;th:ThemeMode;icon?:string;iconImage?:string}){
   const ini=name.split(" ").map(w=>w[0]?.toUpperCase()||"").slice(0,2).join("");
   return <div className={cx("w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden",
-    th==="dark"?"bg-cyan-400/20 text-cyan-300":"bg-blue-100 text-blue-700")}>{icon?.trim() ? <span className="text-2xl leading-none">{icon.trim()}</span> : ini}</div>;
+    th==="dark"?"bg-cyan-400/20 text-cyan-300":"bg-blue-100 text-blue-700")}>
+    {iconImage?.trim()
+      ? <img src={iconImage} alt={`${name} avatar`} className="h-full w-full object-cover"/>
+      : (icon?.trim() ? <span className="text-2xl leading-none">{icon.trim()}</span> : ini)}
+  </div>;
+}
+
+function AvatarPicker({th,label,emojiValue,imageValue,onEmojiChange,onImageChange}:{th:ThemeMode;label:string;emojiValue:string;imageValue?:string;onEmojiChange:(value:string)=>void;onImageChange:(value:string)=>void}){
+  const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
+    const file = e.target.files?.[0];
+    if(!file) return;
+    const resized = await readImageFile(file,{maxDimension:320,maxBytes:110_000});
+    onImageChange(resized);
+    e.target.value = "";
+  };
+  return <div className="space-y-3">
+    <span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>
+    <div className="flex flex-wrap gap-2">
+      {AVATAR_EMOJI_OPTIONS.map(emoji=><button key={emoji} type="button" onClick={()=>onEmojiChange(emoji)} className={cx(
+        "h-10 w-10 rounded-xl border text-lg transition active:scale-95",
+        emojiValue===emoji ? (th==="dark"?"border-cyan-300 bg-cyan-400/25":"border-blue-500 bg-blue-100") : (th==="dark"?"border-white/10 bg-white/5":"border-slate-300 bg-white")
+      )}>{emoji}</button>)}
+      <button type="button" onClick={()=>onEmojiChange("")} className={cx("rounded-xl border px-3 text-xs transition active:scale-95",th==="dark"?"border-white/10 bg-white/5":"border-slate-300 bg-white")}>Clear</button>
+    </div>
+    <div className="flex flex-wrap items-center gap-3">
+      <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>
+        🖼 Upload icon
+        <input type="file" accept="image/*" onChange={handleUpload}/>
+      </label>
+      {imageValue?.trim()&&<button type="button" onClick={()=>onImageChange("")} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-rose-500/15 text-rose-300":"bg-rose-50 text-rose-600")}>Remove image</button>}
+    </div>
+    {(emojiValue || imageValue) && <div className="flex items-center gap-3">
+      <Avatar name="Preview User" icon={emojiValue} iconImage={imageValue} th={th}/>
+      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Preview</p>
+    </div>}
+  </div>;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -1590,7 +1663,7 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
         {user?<>
           <div className="hidden sm:flex items-center gap-2 pl-3 border-l"
             style={{borderColor:th==="dark"?"rgba(255,255,255,0.1)":"rgba(0,0,0,0.1)"}}>
-            <Avatar name={dn(user)} icon={user.icon} th={th}/>
+            <Avatar name={dn(user)} icon={user.icon} iconImage={user.iconImage} th={th}/>
             <span className="font-medium hidden sm:inline">{dn(user)}</span>
           </div>
           <Btn th={th} v="sec" sz="sm" onClick={onLogout} className="shrink-0">{t("signOut")}</Btn>
@@ -1609,7 +1682,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
   onSignUp:(d:Omit<Profile,"id">)=>{ok:boolean;message:string};onToggle:()=>void;
 }){
   const [form,setForm]=useState({accountName:"",accountDigits:"",firstName:"",lastName:"",email:"",phone:"",password:"",password2:"",
-    dateOfBirth:"",nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:"HKG",icon:""});
+    dateOfBirth:"",nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:"HKG",icon:"",iconImage:""});
   const [ident,setIdent]=useState("");
   const [pw,setPw]=useState("");
   const [err,setErr]=useState("");
@@ -1637,6 +1710,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
       nationality:form.nationality.trim(),passportNumber:form.passportNumber.trim(),passportExpiryDate:form.passportExpiryDate,
       dietaryNotes:form.dietaryNotes.trim(),emergencyContact:form.emergencyContact.trim(),homeAirport:normalizeAirport(form.homeAirport)||"HKG",
       icon:form.icon.trim(),
+      iconImage:form.iconImage,
     });
     if(!res.ok){setErr(res.message);}else{onClose();}
   };
@@ -1681,7 +1755,14 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
           <Input th={th} label={t("passport")} value={form.passportNumber} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
           <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
           <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
-          <Input th={th} label={t("profileIcon")} placeholder={t("profileIconHint")} value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value.slice(0,2)}))}/>
+          <AvatarPicker
+            th={th}
+            label={t("profileIcon")}
+            emojiValue={form.icon}
+            imageValue={form.iconImage}
+            onEmojiChange={value=>setForm(f=>({...f,icon:value,iconImage:value? "" : f.iconImage}))}
+            onImageChange={value=>setForm(f=>({...f,iconImage:value,icon:value? "" : f.icon}))}
+          />
           <Input th={th} label={t("emergencyContact")} value={form.emergencyContact} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
           <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
           <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
@@ -1753,7 +1834,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
       </div>
       {!editMode?<div className="space-y-4">
         <div className="flex items-center gap-4">
-          <Avatar name={dn(user)} icon={user.icon} th={th}/>
+          <Avatar name={dn(user)} icon={user.icon} iconImage={user.iconImage} th={th}/>
           <div>
             <p className="font-bold text-xl">{dn(user)}</p>
             <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{user.accountName}</p>
@@ -1786,7 +1867,14 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
         <Input th={th} label={t("passport")} value={form.passportNumber||""} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
         <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth||""} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
         <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate||""} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
-        <Input th={th} label={t("profileIcon")} placeholder={t("profileIconHint")} value={form.icon||""} onChange={e=>setForm(f=>({...f,icon:e.target.value.slice(0,2)}))}/>
+        <AvatarPicker
+          th={th}
+          label={t("profileIcon")}
+          emojiValue={form.icon||""}
+          imageValue={form.iconImage||""}
+          onEmojiChange={value=>setForm(f=>({...f,icon:value,iconImage:value? "" : (f.iconImage||"")}))}
+          onImageChange={value=>setForm(f=>({...f,iconImage:value,icon:value? "" : (f.icon||"")}))}
+        />
         <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport||""} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
         <Input th={th} label={t("emergencyContact")} value={form.emergencyContact||""} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
         <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes||""} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
@@ -1935,6 +2023,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
   readOnly?: boolean;
 }){
   const [tab,setTab]=useState<TripTab>("overview");
+  const [copyState,setCopyState]=useState<"idle"|"ok"|"fail">("idle");
   const role=getTripRole(trip,user.id);
   const isOwner=role==="owner";
   const canManageSettings=!readOnly&&canEditSettings(role);
@@ -1962,8 +2051,8 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
       <div className="relative z-10 p-5 text-white sm:p-10">
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <Badge label={`${t("status")}: ${t(status)}`} th={th} color={getStatusColor(status)}/>
-          <button onClick={()=>{copyText(trip.id);}} className="flex items-center gap-2 rounded-full bg-white/20 px-3 py-2 text-sm transition hover:bg-white/30 sm:px-4 sm:text-base">
-            📋 {trip.id} <span className="text-sm opacity-75">({t("copyId")})</span>
+          <button onClick={async()=>{const ok=await copyText(trip.id);setCopyState(ok?"ok":"fail");setTimeout(()=>setCopyState("idle"),1500);}} className={cx("flex items-center gap-2 rounded-full px-3 py-2 text-sm transition active:scale-95 sm:px-4 sm:text-base",copyState==="ok"?"bg-emerald-400/30":"bg-white/20 hover:bg-white/30")}>
+            📋 {trip.id} <span className="text-sm opacity-75">({copyState==="ok"?"Copied ✓":copyState==="fail"?"Copy failed":t("copyId")})</span>
           </button>
         </div>
         <h1 className="mb-3 text-3xl font-black sm:text-5xl">{trip.title}</h1>
@@ -1989,7 +2078,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} canEditFreeTime={!readOnly} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
     {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onUpdateExpense={onUpdateExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} user={user} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack} onAddShared={onAddSharedPack} onRemoveShared={onRemoveSharedPack}/>}
-    {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
+    {tab==="settings"&&<TripSettings trip={trip} profiles={profiles} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
     {tab==="instructions"&&<TripInstructions th={th} t={t}/>}
   </div>;
 }
@@ -2008,6 +2097,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
   const [editingNoteId,setEditingNoteId]=useState<string|null>(null);
   const [editingNoteText,setEditingNoteText]=useState("");
   const [showPdfModal,setShowPdfModal]=useState(false);
+  const [copyState,setCopyState]=useState<"idle"|"ok"|"fail">("idle");
   const [pdfSections,setPdfSections]=useState<PdfSectionId[]>(()=>PDF_SECTION_ORDER.map(section=>section.id));
 
   const memberProfiles=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
@@ -2179,11 +2269,13 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                 <p className={cx("text-sm uppercase tracking-[0.2em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
                 <p className="mt-2 text-2xl font-bold">{memberProfiles.length}</p>
               </div>
-              <button onClick={()=>copyText(trip.id)} className={cx("rounded-full px-4 py-2 text-sm font-semibold transition",th==="dark"?"bg-cyan-400/15 text-cyan-300 hover:bg-cyan-400/25":"bg-blue-100 text-blue-700 hover:bg-blue-200")}>{trip.id} · {t("copyId")}</button>
+              <button onClick={async()=>{const ok=await copyText(trip.id);setCopyState(ok?"ok":"fail");setTimeout(()=>setCopyState("idle"),1400);}} className={cx("rounded-full px-4 py-2 text-sm font-semibold transition active:scale-95",copyState==="ok"?(th==="dark"?"bg-emerald-400/25 text-emerald-200":"bg-emerald-100 text-emerald-700"):(th==="dark"?"bg-cyan-400/15 text-cyan-300 hover:bg-cyan-400/25":"bg-blue-100 text-blue-700 hover:bg-blue-200"))}>
+                {trip.id} · {copyState==="ok"?"Copied ✓":copyState==="fail"?"Copy failed":t("copyId")}
+              </button>
             </div>
             <div className="mt-6 space-y-3">
               {memberProfiles.map(member=><div key={member.id} className={cx("flex items-center gap-3 rounded-2xl px-4 py-3",th==="dark"?"bg-white/[0.04]":"bg-white")}> 
-                <Avatar name={dn(member)} icon={member.icon} th={th}/>
+                <Avatar name={dn(member)} icon={member.icon} iconImage={member.iconImage} th={th}/>
                 <div className="min-w-0">
                   <p className="font-semibold truncate">{dn(member)}</p>
                   <p className={cx("text-sm truncate",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}{member.id===trip.ownerId?` · ${t("owner")}`:""}</p>
@@ -2233,7 +2325,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
           </div>)}</div>}
         </Card>}
 
-        {showHotelSection&&<Card th={th} className="p-5 sm:p-8 space-y-5">
+        {showHotelSection&&<Card th={th} className="p-5 sm:p-8 space-y-5 min-w-0 overflow-hidden">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-3xl font-bold">{t("hotelStays")}</h3>
@@ -2264,7 +2356,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
         </Card>}
       </div>
 
-      {showNotesSection&&<Card th={th} className="p-5 sm:p-7 space-y-5">
+      {showNotesSection&&<Card th={th} className="p-5 sm:p-7 space-y-5 min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-2xl font-bold">{t("travelNotes")}</h3>
           <Btn th={th} sz="sm" onClick={addNote} disabled={!canEdit}>+ {t("addNote")}</Btn>
@@ -2465,7 +2557,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
       {visibleMemberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
-            <Avatar name={dn(member)} icon={member.icon} th={th}/>
+            <Avatar name={dn(member)} icon={member.icon} iconImage={member.iconImage} th={th}/>
             <div>
               <p className="text-xl font-semibold">{dn(member)}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
@@ -2670,7 +2762,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     setOptionalForm(current=>current.day===day?current:{...current,day});
   },[day]);
 
-  return <div className="grid gap-6 lg:grid-cols-[1.45fr_.95fr]">
+  return <div className="grid min-w-0 gap-6 lg:grid-cols-[1.45fr_.95fr]">
     <div className="space-y-5">
       <Card th={th} className="p-5 space-y-4">
         <div className="grid sm:grid-cols-4 gap-3">
@@ -2681,14 +2773,14 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         </div>
       </Card>
 
-      <Card th={th} className="p-8">
+      <Card th={th} className="p-8 min-w-0 overflow-hidden">
         <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-2">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
-          <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold">Split timeline by traveler</p>
-            <Select th={th} value={travelerView} onChange={e=>setTravelerView(e.target.value)} className="max-w-[220px] !rounded-xl !px-3 !py-2 text-sm">
+            <Select th={th} value={travelerView} onChange={e=>setTravelerView(e.target.value)} className="w-full sm:w-auto sm:max-w-[220px] !rounded-xl !px-3 !py-2 text-sm">
               {trip.members.map(memberId=>{
                 const traveler=profileMap.get(memberId);
                 return <option key={memberId} value={memberId}>{traveler?dn(traveler):memberId}</option>;
@@ -3308,7 +3400,7 @@ function TripInstructions({th,t}:{th:ThemeMode;t:(k:TKey)=>string}){
   </Card>;
 }
 
-function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
+function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;profiles:Profile[];canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
   const isMobileScreen=useMobileScreen();
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
@@ -3329,6 +3421,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const [selectedWeatherResult,setSelectedWeatherResult]=useState<string>("");
   const [weatherStartDay,setWeatherStartDay]=useState(1);
   const [weatherEndDay,setWeatherEndDay]=useState(Math.max(1, trip.duration));
+  const [sendingReminder,setSendingReminder]=useState(false);
 
   useEffect(()=>{
     setForm({...trip,bannerImageUrl:""});
@@ -3346,6 +3439,56 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     const current = JSON.stringify(form);
     setHasUnsavedChanges(current!==baseline);
   },[form,trip]);
+
+  const ownerOrEditors = useMemo(()=>{
+    return trip.members
+      .map(id=>profiles.find(profile=>profile.id===id))
+      .filter(Boolean)
+      .filter(member=>{
+        const role = getTripRole(trip,(member as Profile).id);
+        return role==="owner" || role==="editor";
+      }) as Profile[];
+  },[trip,profiles]);
+
+  const reminderTemplate = normalizeReminderTemplate(form.reminderTemplate);
+
+  const buildReminderDraft = ()=>{
+    const lines:string[] = [reminderTemplate.body.trim()];
+    if(reminderTemplate.includeTripTitle) lines.push(`Trip: ${trip.title}`);
+    if(reminderTemplate.includeDates) lines.push(`Dates: ${fmtDate(trip.startDate)} - ${fmtDate(trip.endDate)}`);
+    if(reminderTemplate.includeLocation) lines.push(`Location: ${trip.location || "—"}`);
+    if(reminderTemplate.includeTripId) lines.push(`Trip ID: ${trip.id}`);
+    if(reminderTemplate.includeFlightSummary){
+      const summary = tripFlightSummary(trip).join(" · ");
+      lines.push(`Flights: ${summary || "Not set"}`);
+    }
+    if(reminderTemplate.includeHotelSummary){
+      const summary = tripHotelSummary(trip).join(" · ");
+      lines.push(`Hotels: ${summary || "Not set"}`);
+    }
+    if(reminderTemplate.includeNotesSummary && trip.travelNotes.length){
+      lines.push(`Notes: ${trip.travelNotes.slice(0,3).map(note=>note.text || "(attachment)").join(" | ")}`);
+    }
+    return {
+      subject: reminderTemplate.subject.replaceAll("{tripTitle}",trip.title).trim() || `Trip reminder: ${trip.title}`,
+      body: lines.filter(Boolean).join("\n\n"),
+    };
+  };
+
+  const sendReminderEmail = async()=>{
+    setSendingReminder(true);
+    try{
+      const draft = buildReminderDraft();
+      const recipients = trip.members
+        .map(id=>profiles.find(profile=>profile.id===id)?.email?.trim())
+        .filter((email):email is string=>Boolean(email));
+      const senderHint = ownerOrEditors.map(person=>person.email).filter(Boolean).join(", ");
+      const mailto = `mailto:${recipients[0] ?? ""}?bcc=${encodeURIComponent(recipients.slice(1).join(","))}&subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(`${draft.body}\n\nSender options (owner/editor): ${senderHint}`)}`;
+      window.open(mailto,"_blank");
+    }finally{
+      setSendingReminder(false);
+    }
+  };
 
   const save=()=>{
     const shouldKeepCustom=Boolean(form.customLocation?.name?.trim()) && Number.isFinite(form.customLocation?.lat) && Number.isFinite(form.customLocation?.lon) && !(form.customLocation?.lat===0 && form.customLocation?.lon===0 && !form.customLocation?.name.trim());
@@ -3494,6 +3637,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     }));
     setSelectedWeatherResult("");
   };
+  const updateReminderTemplate = (patch:Partial<ReminderTemplate>)=>{
+    setForm(current=>({...current,reminderTemplate:{...normalizeReminderTemplate(current.reminderTemplate),...patch}}));
+  };
 
   const removeWeatherLocationPlan=(id:string)=>{
     setForm(f=>({...f, weatherLocations: (f.weatherLocations ?? []).filter(item=>item.id!==id)}));
@@ -3555,6 +3701,36 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
           </div>
         </div>
       </div>
+    </Card>
+    <Card th={th} className="p-5 sm:p-6 space-y-4 min-w-0 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xl font-semibold">Email Reminder</h3>
+        <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void sendReminderEmail()} disabled={sendingReminder}>
+          {sendingReminder ? "Preparing..." : "Send reminder draft"}
+        </Btn>
+      </div>
+      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
+        Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
+      </p>
+      <Input th={th} label="Subject template" value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})}/>
+      <Textarea th={th} label="Email body template" value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28"/>
+      <div className="grid sm:grid-cols-2 gap-2 text-sm">
+        {[
+          ["Trip title","includeTripTitle"],
+          ["Trip dates","includeDates"],
+          ["Location","includeLocation"],
+          ["Trip ID","includeTripId"],
+          ["Flight summary","includeFlightSummary"],
+          ["Hotel summary","includeHotelSummary"],
+          ["Top travel notes","includeNotesSummary"],
+        ].map(([label,key])=><label key={key} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          <input type="checkbox" checked={Boolean(reminderTemplate[key as keyof ReminderTemplate])} onChange={e=>updateReminderTemplate({[key]:e.target.checked} as Partial<ReminderTemplate>)}/>
+          {label}
+        </label>)}
+      </div>
+      <p className={cx("text-xs",th==="dark"?"text-cyan-300":"text-blue-700")}>
+        Available sender accounts (owner/editor): {ownerOrEditors.map(person=>person.email || `@${person.accountName}`).join(", ") || "None"}
+      </p>
     </Card>
     {isMobileScreen&&<Card th={th} className="p-4">
       <Select th={th} label={t("moreSettings")} value={mobileDetailSection} onChange={e=>setMobileDetailSection(e.target.value as "none"|"flights"|"hotels"|"weather"|"banner")}>
@@ -3860,7 +4036,7 @@ function AdminTravelers({profiles,trips,th,t,onDelete}:{profiles:Profile[];trips
       return <Card key={p.id} th={th} className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex gap-3">
-            <Avatar name={dn(p)} icon={p.icon} th={th}/>
+            <Avatar name={dn(p)} icon={p.icon} iconImage={p.iconImage} th={th}/>
             <div>
               <p className="font-semibold text-lg">{dn(p)}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{p.accountName} · {p.email} · {p.phone}</p>
