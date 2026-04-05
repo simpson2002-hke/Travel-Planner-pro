@@ -219,6 +219,17 @@ const canEditSettings = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditItinerary = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditExpenses = (_role:TripRole)=>true;
 const tripRoleLabel = (role:TripRole,t:(k:TKey)=>string)=>role==="owner"?t("roleOwner"):role==="editor"?t("roleEditor"):t("roleViewer");
+const buildGmailComposeUrl = (to:string, subject:string, body:string)=>{
+  const params = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    tf: "1",
+    to,
+    su: subject,
+    body,
+  });
+  return `https://mail.google.com/mail/u/0/?${params.toString()}`;
+};
 const toTimeMinutes = (time:string)=>{
   const [rawH,rawM] = (time || "").split(":");
   const h = Number(rawH);
@@ -2587,7 +2598,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",trip.title);
     const body = buildReminderBody();
     if(provider==="gmail"){
-      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const gmailUrl = buildGmailComposeUrl(to, subject, body);
       window.open(gmailUrl,"_blank");
     }else{
       const first = reminderRecipients[0]?.email?.trim() ?? "";
@@ -3547,6 +3558,14 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   const [weatherStartDay,setWeatherStartDay]=useState(1);
   const [weatherEndDay,setWeatherEndDay]=useState(Math.max(1, trip.duration));
   const [sendingReminder,setSendingReminder]=useState(false);
+  const reminderTemplate = normalizeReminderTemplate(form.reminderTemplate);
+  const ownerOrEditors = trip.members
+    .map(id=>profiles.find(profile=>profile.id===id))
+    .filter((member):member is Profile=>Boolean(member))
+    .filter(member=>{
+      const role = getTripRole(trip, member.id);
+      return role==="owner" || role==="editor";
+    });
 
   useEffect(()=>{
     setForm({...trip,bannerImageUrl:""});
@@ -3715,6 +3734,37 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   };
   const updateReminderTemplate = (patch:Partial<ReminderTemplate>)=>{
     setForm(current=>({...current,reminderTemplate:{...normalizeReminderTemplate(current.reminderTemplate),...patch}}));
+  };
+  const buildReminderBody=()=>{
+    const lines:string[]=[reminderTemplate.body.trim()];
+    if(reminderTemplate.includeTripTitle) lines.push(`${t("reminderTripTitle")}: ${form.title}`);
+    if(reminderTemplate.includeDates) lines.push(`${t("reminderTripDates")}: ${fmtDate(form.startDate)} - ${fmtDate(form.endDate)}`);
+    if(reminderTemplate.includeLocation) lines.push(`${t("reminderLocation")}: ${form.location || "—"}`);
+    if(reminderTemplate.includeTripId) lines.push(`${t("reminderTripId")}: ${trip.id}`);
+    if(reminderTemplate.includeFlightSummary){
+      lines.push(`${t("reminderFlightSummary")}: ${tripFlightSummary(form).join(" · ") || t("none")}`);
+    }
+    if(reminderTemplate.includeHotelSummary){
+      lines.push(`${t("reminderHotelSummary")}: ${tripHotelSummary(form).join(" · ") || t("none")}`);
+    }
+    if(reminderTemplate.includeNotesSummary){
+      const noteTexts = form.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
+      if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
+    }
+    return lines.filter(Boolean).join("\n\n");
+  };
+  const sendReminderEmail=()=>{
+    const recipients = trip.members
+      .map(id=>profiles.find(profile=>profile.id===id))
+      .filter((member):member is Profile=>Boolean(member?.email?.trim()))
+      .map(member=>member.email.trim());
+    if(recipients.length===0) return;
+    setSendingReminder(true);
+    const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",form.title);
+    const body = buildReminderBody();
+    const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
+    window.open(gmailUrl,"_blank","noopener,noreferrer");
+    setTimeout(()=>setSendingReminder(false),500);
   };
 
   const removeWeatherLocationPlan=(id:string)=>{
