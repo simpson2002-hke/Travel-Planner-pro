@@ -58,6 +58,7 @@ const en = {
   optional: "optional",
   nationality: "Nationality", passport: "Passport No.", passportExpiry: "Passport Expiry",
   dietaryNotes: "Dietary Notes", emergencyContact: "Emergency Contact",
+  profileIcon: "Profile Icon", profileIconHint: "Emoji or short text (e.g. ✈️)",
   homeAirport: "Home Airport",
 
   createTrip: "Create Trip", joinTrip: "Join Trip",
@@ -104,6 +105,7 @@ const en = {
   avgHigh: "Avg High", avgLow: "Avg Low", avgRain: "Avg Rain",
 
   day: "Day", time: "Time", startTime: "Start Time", endTime: "End Time", endDayOffset: "End Day Offset", googleMapUrl: "Google Map URL", activity: "Activity", stopLocation: "Stop Location", transport: "Transport",
+  transportType: "Transport Type", customTransportType: "Custom Transport Type",
   activityType: "Activity Type", timeMode: "Time Type", timed: "Timed", wholeDay: "Whole Day", numberOfDays: "No. of Days", remarks: "Remarks",
   details: "Details", addActivity: "Add Activity", freeTime: "Free Time",
   moveUp: "Up", moveDown: "Down", removeActivity: "Remove",
@@ -260,6 +262,7 @@ const zh: typeof en = {
   optional: "選填",
   nationality: "國籍", passport: "護照號碼", passportExpiry: "護照到期日",
   dietaryNotes: "飲食備註", emergencyContact: "緊急聯繫人",
+  profileIcon: "個人圖示", profileIconHint: "輸入 emoji 或簡短文字（例如 ✈️）",
   homeAirport: "常用機場",
 
   createTrip: "建立旅程", joinTrip: "加入旅程",
@@ -306,6 +309,7 @@ const zh: typeof en = {
   avgHigh: "均高", avgLow: "均低", avgRain: "均雨量",
 
   day: "日", time: "時間", startTime: "開始時間", endTime: "結束時間", endDayOffset: "跨日天數", googleMapUrl: "Google 地圖網址", activity: "活動", stopLocation: "停靠地點", transport: "交通方式",
+  transportType: "交通類型", customTransportType: "自訂交通類型",
   activityType: "活動類型", timeMode: "時間類型", timed: "指定時間", wholeDay: "全天", numberOfDays: "天數", remarks: "備註",
   details: "詳情", addActivity: "新增活動", freeTime: "自由活動",
   moveUp: "上移", moveDown: "下移", removeActivity: "移除",

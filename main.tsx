@@ -17,6 +17,7 @@ type UserSection = "dashboard" | "trips";
 type Profile = {
   id: string; accountName: string; firstName: string; lastName: string;
   email: string; phone: string; password: string;
+  icon?: string;
   dateOfBirth?: string;
   nationality?: string; passportNumber?: string; passportExpiryDate?: string; dietaryNotes?: string;
   emergencyContact?: string; homeAirport?: string;
@@ -727,6 +728,7 @@ function normProfile(i:unknown):Profile{
   const p=(i??{}) as Partial<Profile>;
   return { id:p.id??uid("u"), accountName:upper(p.accountName??""), firstName:normalizeName(p.firstName??""),
     lastName:normalizeName(p.lastName??""), email:p.email??"", phone:p.phone??"", password:p.password??"", dateOfBirth:p.dateOfBirth??"",
+    icon:p.icon??"",
     nationality:p.nationality??"", passportNumber:p.passportNumber??"", passportExpiryDate:p.passportExpiryDate??"",
     dietaryNotes:p.dietaryNotes??"", emergencyContact:p.emergencyContact??"", homeAirport:normalizeAirport(p.homeAirport??"HKG")||"HKG" };
 }
@@ -831,7 +833,10 @@ function normTrip(i:unknown):Trip{
       mapUrl: (item as ItineraryItem).mapUrl ?? "",
       mediaSize: (item as ItineraryItem).mediaSize ?? "small",
       transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" },
-      activityType: (item as ItineraryItem).activityType ?? ((item as ItineraryItem).transport === "Free Time" ? "free-time" : "regular"),
+      activityType: (item as ItineraryItem).activityType
+        ?? ((item as ItineraryItem).transport === "Free Time"
+          ? "free-time"
+          : ((item as ItineraryItem).transport && (item as ItineraryItem).transport !== "Activity" ? "transport" : "regular")),
       freeTimeOwnerId: (item as ItineraryItem).freeTimeOwnerId ?? "",
       freeTimeParticipantIds: Array.isArray((item as ItineraryItem).freeTimeParticipantIds) ? (item as ItineraryItem).freeTimeParticipantIds : [],
     })),
@@ -1528,10 +1533,10 @@ function Empty({icon,title,desc,th}:{icon:string;title:string;desc:string;th:The
   </div>;
 }
 
-function Avatar({name,th}:{name:string;th:ThemeMode}){
+function Avatar({name,th,icon}:{name:string;th:ThemeMode;icon?:string}){
   const ini=name.split(" ").map(w=>w[0]?.toUpperCase()||"").slice(0,2).join("");
-  return <div className={cx("w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg",
-    th==="dark"?"bg-cyan-400/20 text-cyan-300":"bg-blue-100 text-blue-700")}>{ini}</div>;
+  return <div className={cx("w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg overflow-hidden",
+    th==="dark"?"bg-cyan-400/20 text-cyan-300":"bg-blue-100 text-blue-700")}>{icon?.trim() ? <span className="text-2xl leading-none">{icon.trim()}</span> : ini}</div>;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -1585,7 +1590,7 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
         {user?<>
           <div className="hidden sm:flex items-center gap-2 pl-3 border-l"
             style={{borderColor:th==="dark"?"rgba(255,255,255,0.1)":"rgba(0,0,0,0.1)"}}>
-            <Avatar name={dn(user)} th={th}/>
+            <Avatar name={dn(user)} icon={user.icon} th={th}/>
             <span className="font-medium hidden sm:inline">{dn(user)}</span>
           </div>
           <Btn th={th} v="sec" sz="sm" onClick={onLogout} className="shrink-0">{t("signOut")}</Btn>
@@ -1604,7 +1609,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
   onSignUp:(d:Omit<Profile,"id">)=>{ok:boolean;message:string};onToggle:()=>void;
 }){
   const [form,setForm]=useState({accountName:"",accountDigits:"",firstName:"",lastName:"",email:"",phone:"",password:"",password2:"",
-    dateOfBirth:"",nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:"HKG"});
+    dateOfBirth:"",nationality:"",passportNumber:"",passportExpiryDate:"",dietaryNotes:"",emergencyContact:"",homeAirport:"HKG",icon:""});
   const [ident,setIdent]=useState("");
   const [pw,setPw]=useState("");
   const [err,setErr]=useState("");
@@ -1630,7 +1635,8 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
       email:form.email.trim(),phone:form.phone.trim(),password:form.password,
       dateOfBirth:form.dateOfBirth,
       nationality:form.nationality.trim(),passportNumber:form.passportNumber.trim(),passportExpiryDate:form.passportExpiryDate,
-      dietaryNotes:form.dietaryNotes.trim(),emergencyContact:form.emergencyContact.trim(),homeAirport:normalizeAirport(form.homeAirport)||"HKG"
+      dietaryNotes:form.dietaryNotes.trim(),emergencyContact:form.emergencyContact.trim(),homeAirport:normalizeAirport(form.homeAirport)||"HKG",
+      icon:form.icon.trim(),
     });
     if(!res.ok){setErr(res.message);}else{onClose();}
   };
@@ -1675,6 +1681,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
           <Input th={th} label={t("passport")} value={form.passportNumber} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
           <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
           <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
+          <Input th={th} label={t("profileIcon")} placeholder={t("profileIconHint")} value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value.slice(0,2)}))}/>
           <Input th={th} label={t("emergencyContact")} value={form.emergencyContact} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
           <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
           <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
@@ -1746,7 +1753,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
       </div>
       {!editMode?<div className="space-y-4">
         <div className="flex items-center gap-4">
-          <Avatar name={dn(user)} th={th}/>
+          <Avatar name={dn(user)} icon={user.icon} th={th}/>
           <div>
             <p className="font-bold text-xl">{dn(user)}</p>
             <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{user.accountName}</p>
@@ -1762,6 +1769,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
           <InfoRow label={t("nationality")} value={user.nationality || "—"} th={th}/>
           <InfoRow label={t("passport")} value={user.passportNumber || "—"} th={th}/>
           <InfoRow label={t("passportExpiry")} value={user.passportExpiryDate ? fmtDate(user.passportExpiryDate) : "—"} th={th}/>
+          <InfoRow label={t("profileIcon")} value={user.icon || "—"} th={th}/>
           <InfoRow label={t("homeAirport")} value={user.homeAirport || "—"} th={th}/>
           <InfoRow label={t("emergencyContact")} value={user.emergencyContact || "—"} th={th}/>
           <InfoRow label={t("dietaryNotes")} value={user.dietaryNotes || "—"} th={th}/>
@@ -1778,6 +1786,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
         <Input th={th} label={t("passport")} value={form.passportNumber||""} onChange={e=>setForm(f=>({...f,passportNumber:e.target.value}))}/>
         <Input th={th} label={t("dateOfBirth")} type="date" value={form.dateOfBirth||""} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/>
         <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate||""} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
+        <Input th={th} label={t("profileIcon")} placeholder={t("profileIconHint")} value={form.icon||""} onChange={e=>setForm(f=>({...f,icon:e.target.value.slice(0,2)}))}/>
         <Input th={th} label={t("homeAirport")} placeholder={t("homeAirportHint")} maxLength={3} value={form.homeAirport||""} onChange={e=>setForm(f=>({...f,homeAirport:upper(e.target.value).slice(0,3)}))}/>
         <Input th={th} label={t("emergencyContact")} value={form.emergencyContact||""} onChange={e=>setForm(f=>({...f,emergencyContact:e.target.value}))}/>
         <Textarea th={th} label={t("dietaryNotes")} value={form.dietaryNotes||""} onChange={e=>setForm(f=>({...f,dietaryNotes:e.target.value}))}/>
@@ -2161,10 +2170,6 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
                 <p className="mt-2 text-lg font-semibold">{flightLegs.map(leg=>leg.flightNumber).filter(Boolean).join(", ") || "—"}</p>
               </div>
-              <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-                <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("hotelDetails")}</p>
-                <p className="mt-2 text-lg font-semibold">{hotels.length || 0} {hotels.length===1?t("hotelDetails"):t("hotelStays")}</p>
-              </div>
             </div>
           </div>
 
@@ -2178,7 +2183,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             </div>
             <div className="mt-6 space-y-3">
               {memberProfiles.map(member=><div key={member.id} className={cx("flex items-center gap-3 rounded-2xl px-4 py-3",th==="dark"?"bg-white/[0.04]":"bg-white")}> 
-                <Avatar name={dn(member)} th={th}/>
+                <Avatar name={dn(member)} icon={member.icon} th={th}/>
                 <div className="min-w-0">
                   <p className="font-semibold truncate">{dn(member)}</p>
                   <p className={cx("text-sm truncate",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}{member.id===trip.ownerId?` · ${t("owner")}`:""}</p>
@@ -2460,7 +2465,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
       {visibleMemberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
-            <Avatar name={dn(member)} th={th}/>
+            <Avatar name={dn(member)} icon={member.icon} th={th}/>
             <div>
               <p className="text-xl font-semibold">{dn(member)}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{member.accountName}</p>
@@ -2514,7 +2519,8 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 }
 
 function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;canEditFreeTime:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,mediaSize:"small" as "small"|"medium"|"large",freeTimeParticipantIds:[] as string[]};
+  const TRANSPORT_OPTIONS = ["Flight","Train","Bus","Taxi","Rental Car","Walk","Ferry","Metro","Other"] as const;
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",transportType:"Flight",customTransport:"",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,mediaSize:"small" as "small"|"medium"|"large",freeTimeParticipantIds:[] as string[]};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
     { value:"transport", label:t("transport") },
@@ -2552,7 +2558,9 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     e.preventDefault();
     if(!(canEdit || (form.activityType==="free-time" && canEditFreeTime))) return;
     if(!form.title.trim())return;
-    const transportLabel = form.activityType==="transport" ? "Transport" : form.activityType==="free-time" ? "Free Time" : "Activity";
+    const transportLabel = form.activityType==="transport"
+      ? (form.transportType==="Other" ? (form.customTransport.trim() || "Other") : form.transportType)
+      : form.activityType==="free-time" ? "Free Time" : "Activity";
     const payload={
       startTime:form.startTime,
       endTime:form.endTime,
@@ -2606,7 +2614,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const edit=(it:ItineraryItem)=>{
     const mode=((it.startTime==="00:00"||it.startTime==="00:00:00")&&(it.endTime==="23:59"||it.endTime==="23:59:00"))?"whole-day":"timed";
     if(!canManageItem(it)) return;
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1,mediaSize:it.mediaSize??"small",freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
+    const inferredType: "regular"|"free-time"|"transport" = it.activityType
+      ?? (it.transport==="Free Time"
+        ? "free-time"
+        : (it.transport && it.transport!=="Activity" ? "transport" : "regular"));
+    const matchedTransport = TRANSPORT_OPTIONS.find(option=>option.toLowerCase()===(it.transport || "").toLowerCase());
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,transportType:matchedTransport ?? "Other",customTransport:matchedTransport ? "" : (inferredType==="transport" ? (it.transport||"") : ""),details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:inferredType,timeMode:mode,dayCount:(it.endDayOffset??0)+1,mediaSize:it.mediaSize??"small",freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2755,7 +2768,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             if(mode==="free-time"){
               setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:"",freeTimeParticipantIds:f.freeTimeParticipantIds??[]}));
             }else if(mode==="transport"){
-              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport"),freeTimeParticipantIds:[]}));
+              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport"),transportType:f.transportType||"Flight",customTransport:f.customTransport||"",freeTimeParticipantIds:[]}));
             }else{
               setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title,freeTimeParticipantIds:[]}));
             }
@@ -2763,6 +2776,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         >
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
+        {form.activityType==="transport"&&<>
+          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>({...f,transportType:e.target.value}))}>
+            {TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}
+          </Select>
+          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>({...f,customTransport:e.target.value}))}/>}
+        </>}
         {form.activityType==="free-time"&&<div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>Invite travelers</p>
           <div className="flex flex-wrap gap-2">
@@ -3841,7 +3860,7 @@ function AdminTravelers({profiles,trips,th,t,onDelete}:{profiles:Profile[];trips
       return <Card key={p.id} th={th} className="p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex gap-3">
-            <Avatar name={dn(p)} th={th}/>
+            <Avatar name={dn(p)} icon={p.icon} th={th}/>
             <div>
               <p className="font-semibold text-lg">{dn(p)}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>@{p.accountName} · {p.email} · {p.phone}</p>
