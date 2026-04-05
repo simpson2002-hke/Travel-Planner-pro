@@ -65,7 +65,7 @@ type ItineraryItem = {
 
 type OptionalStop = {
   id: string; day: number; type: "site" | "restaurant" | "other"; title: string; location: string;
-  url: string; notes: string;
+  url: string; mapUrl?: string; notes: string;
 };
 
 type FreeTimeEntry = {
@@ -192,6 +192,45 @@ const canEditSettings = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditItinerary = (role:TripRole)=>role==="owner"||role==="editor";
 const canEditExpenses = (_role:TripRole)=>true;
 const tripRoleLabel = (role:TripRole,t:(k:TKey)=>string)=>role==="owner"?t("roleOwner"):role==="editor"?t("roleEditor"):t("roleViewer");
+const toTimeMinutes = (time:string)=>{
+  const [rawH,rawM] = (time || "").split(":");
+  const h = Number(rawH);
+  const m = Number(rawM);
+  if(!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return Math.max(0,Math.min(23,h))*60 + Math.max(0,Math.min(59,m));
+};
+const sortItineraryByDayAndTime=(items:ItineraryItem[])=>{
+  const byDay = new Map<number,ItineraryItem[]>();
+  for(const item of items){
+    const key = item.day || 1;
+    byDay.set(key,[...(byDay.get(key) ?? []),item]);
+  }
+  const dayOrderMaps = new Map<number,Map<string,number>>();
+  for(const [day,dayItems] of byDay.entries()){
+    const sorted = [...dayItems].sort((a,b)=>
+      (a.startTime || "23:59").localeCompare(b.startTime || "23:59")
+      || (a.endTime || "23:59").localeCompare(b.endTime || "23:59")
+      || a.title.localeCompare(b.title)
+      || a.id.localeCompare(b.id));
+    dayOrderMaps.set(day,new Map(sorted.map((item,index)=>[item.id,index+1])));
+  }
+  return items.map(item=>({
+    ...item,
+    order: dayOrderMaps.get(item.day || 1)?.get(item.id) ?? item.order,
+  }));
+};
+const hasTimeOverlap=(candidate:Pick<ItineraryItem,"startTime"|"endTime"|"endDayOffset">, existing:Pick<ItineraryItem,"startTime"|"endTime"|"endDayOffset">)=>{
+  const startA = toTimeMinutes(candidate.startTime);
+  const endA = toTimeMinutes(candidate.endTime);
+  const startB = toTimeMinutes(existing.startTime);
+  const endB = toTimeMinutes(existing.endTime);
+  if(startA===null || endA===null || startB===null || endB===null) return false;
+  const absStartA = startA;
+  const absEndA = (candidate.endDayOffset ?? 0) * 1440 + endA;
+  const absStartB = startB;
+  const absEndB = (existing.endDayOffset ?? 0) * 1440 + endB;
+  return absStartA < absEndB && absStartB < absEndA;
+};
 
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
@@ -799,7 +838,7 @@ function normTrip(i:unknown):Trip{
     optionalStops: Array.isArray((t as Partial<Trip>).optionalStops) ? (t as Partial<Trip>).optionalStops!.map((stop, index) => ({
       id: stop.id ?? uid(`opt-${index}`), day: typeof stop.day === "number" ? stop.day : 1,
       type: stop.type === "restaurant" || stop.type === "other" ? stop.type : "site",
-      title: stop.title ?? "", location: stop.location ?? "", url: stop.url ?? "", notes: stop.notes ?? "",
+      title: stop.title ?? "", location: stop.location ?? "", url: stop.url ?? "", mapUrl: stop.mapUrl ?? "", notes: stop.notes ?? "",
     })) : [],
     freeTimeEntries: Array.isArray((t as Partial<Trip>).freeTimeEntries) ? (t as Partial<Trip>).freeTimeEntries!.map((entry, index) => ({
       id: entry.id ?? uid(`ft-${index}`),
@@ -1363,18 +1402,7 @@ function addFlightLegsToItinerary(base:ItineraryItem[], flightLegs:FlightLeg[], 
     } as ItineraryItem;
   });
   const combined=[...nonFlightItems,...generated];
-  const byDay=new Map<number,ItineraryItem[]>();
-  for(const item of combined){
-    const key=item.day||1;
-    const list=byDay.get(key)??[];
-    list.push(item);
-    byDay.set(key,list);
-  }
-  return [...combined].map(item=>{
-    const sameDay=(byDay.get(item.day||1)??[]).slice().sort((a,b)=>a.startTime.localeCompare(b.startTime)||a.title.localeCompare(b.title));
-    const idx=sameDay.findIndex(x=>x.id===item.id);
-    return {...item,order:idx>=0?idx+1:item.order};
-  });
+  return sortItineraryByDayAndTime(combined);
 }
 
 async function searchHotelByQuery(siteCfg:SiteSettings,hotelName:string,location:string){
@@ -2441,7 +2469,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     { value:"transport", label:t("transport") },
     { value:"free-time", label:t("freeTime") },
   ] as const;
-  const emptyOptionalForm={day:1,type:"site" as OptionalStop["type"],title:"",location:"",url:"",notes:""};
+  const emptyOptionalForm={day:1,type:"site" as OptionalStop["type"],title:"",location:"",url:"",mapUrl:"",notes:""};
   const [activePane,setActivePane]=useState<"schedule"|"saved">("schedule");
   const [day,setDay]=useState(1);
   const [form,setForm]=useState(emptyForm);
@@ -2455,7 +2483,6 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 
   const dayItems=trip.itinerary.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
   const optionalDayItems=trip.optionalStops.filter(stop=>stop.day===day);
-  const nextOrder=(trip.itinerary.filter(it=>it.day===day).reduce((max,it)=>Math.max(max,it.order),0))+1;
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
   const mediaClassBySize: Record<"small"|"medium"|"large", string> = {
@@ -2492,8 +2519,14 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     };
     const next=editId
       ? trip.itinerary.map(it=>it.id===editId?{...it,...payload,day}:it)
-      : [...trip.itinerary,{id:uid("it"),day,order:nextOrder,...payload,transitToNext:{duration:"",details:""}}];
-    persistItems(next);
+      : [...trip.itinerary,{id:uid("it"),day,order:0,...payload,transitToNext:{duration:"",details:""}}];
+    const candidate = { startTime: payload.startTime, endTime: payload.endTime, endDayOffset: payload.endDayOffset };
+    const overlap = trip.itinerary.some(it=>it.day===day && it.id!==editId && hasTimeOverlap(candidate,it));
+    if(overlap){
+      const shouldContinue = window.confirm("This activity overlaps another itinerary item. Continue anyway?");
+      if(!shouldContinue) return;
+    }
+    persistItems(sortItineraryByDayAndTime(next));
     setEditId(null);
     setForm(emptyForm);
   };
@@ -2506,7 +2539,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     [reordered[idx],reordered[swapWith]]=[reordered[swapWith],reordered[idx]];
     const orderMap=new Map(reordered.map((item,index)=>[item.id,index+1]));
     const next=trip.itinerary.map(it=>it.day===day?{...it,order:orderMap.get(it.id)??it.order}:it);
-    persistItems(next);
+    persistItems(sortItineraryByDayAndTime(next));
   };
 
   const remove=async(id:string)=>{
@@ -2540,7 +2573,11 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     e.preventDefault();
     if(!canEdit) return;
     if(!optionalForm.title.trim()) return;
-    const normalized={...optionalForm, day:Math.min(Math.max(optionalForm.day,1),trip.duration)};
+    const normalized={
+      ...optionalForm,
+      day:Math.min(Math.max(optionalForm.day,1),trip.duration),
+      mapUrl: optionalForm.mapUrl || googleMapEmbedUrl(optionalForm.location),
+    };
     const next = optionalEditId
       ? trip.optionalStops.map(stop=>stop.id===optionalEditId?{...stop,...normalized}:stop)
       : [{id:uid("opt"),...normalized}, ...trip.optionalStops];
@@ -2551,7 +2588,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 
   const editOptionalStop=(stop:OptionalStop)=>{
     setOptionalEditId(stop.id);
-    setOptionalForm({day:stop.day,type:stop.type,title:stop.title,location:stop.location,url:stop.url,notes:stop.notes});
+    setOptionalForm({day:stop.day,type:stop.type,title:stop.title,location:stop.location,url:stop.url,mapUrl:stop.mapUrl ?? "",notes:stop.notes});
     setDay(stop.day);
     setActivePane("saved");
   };
@@ -2612,7 +2649,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
                 {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid gap-3",it.mapUrl&&it.photo?"grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
-                  {it.mapUrl&&<div className="aspect-square overflow-hidden rounded-2xl border border-white/10">
+                  {it.mapUrl&&<div className={cx("overflow-hidden rounded-2xl border border-white/10",it.photo ? "aspect-square" : "aspect-[16/9] max-h-44")}>
                     <iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="h-full w-full"/>
                   </div>}
                   {it.photo&&<div className="aspect-square overflow-hidden rounded-2xl border border-white/10 bg-slate-100/30">
@@ -2637,6 +2674,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 </div>
                 <p className={cx("mt-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{stop.location || "—"}</p>
                 {stop.notes&&<p className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-300":"text-slate-600")}>{stop.notes}</p>}
+                {stop.mapUrl&&<iframe src={stop.mapUrl} title={`${stop.title}-optional-map`} loading="lazy" className="mt-3 h-36 w-full max-w-md rounded-2xl border border-white/10"/>}
                 {stop.url&&<a href={stop.url} target="_blank" rel="noreferrer" className={cx("mt-3 inline-flex text-sm font-semibold underline",th==="dark"?"text-cyan-300":"text-blue-700")}>{stop.url}</a>}
               </div>
               <div className="flex gap-2">
@@ -2730,7 +2768,9 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           <option value="other">{t("other")}</option>
         </Select>
         <Input th={th} label={t("placeName")} value={optionalForm.title} onChange={e=>setOptionalForm(f=>({...f,title:e.target.value}))}/>
-        <Input th={th} label={t("optionalLocation")} value={optionalForm.location} onChange={e=>setOptionalForm(f=>({...f,location:e.target.value}))}/>
+        <Input th={th} label={t("optionalLocation")} value={optionalForm.location} onChange={e=>setOptionalForm(f=>({...f,location:e.target.value,mapUrl:googleMapEmbedUrl(e.target.value)}))}/>
+        <Input th={th} label={t("googleMapUrl")} value={optionalForm.mapUrl} onChange={e=>setOptionalForm(f=>({...f,mapUrl:e.target.value}))}/>
+        {optionalForm.mapUrl&&<iframe src={optionalForm.mapUrl} title="optional-map-preview" loading="lazy" className="h-36 w-full rounded-2xl border border-white/10"/>}
         <Input th={th} label={t("reservationLink")} value={optionalForm.url} onChange={e=>setOptionalForm(f=>({...f,url:e.target.value}))}/>
         <Textarea th={th} label={t("optionalPlaceNotes")} value={optionalForm.notes} onChange={e=>setOptionalForm(f=>({...f,notes:e.target.value}))}/>
         <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
@@ -3256,8 +3296,10 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   };
   const removeTrip=()=>{
     if(!isOwner) return;
-    const ok=window.confirm(`${t("deleteTripConfirm")} "${trip.title}"`);
-    if(!ok) return;
+    const firstOk=window.confirm(`${t("deleteTripConfirm")} "${trip.title}"`);
+    if(!firstOk) return;
+    const secondOk=window.confirm(`Please reconfirm: permanently delete "${trip.title}"?`);
+    if(!secondOk) return;
     onDeleteTrip(trip.id);
     onBack();
   };
@@ -3672,6 +3714,13 @@ function AdminWorkspace({profiles,trips,th,t,adminPw,adminAuth,setAdminPw,setAdm
 
 function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{trips:Trip[];profiles:Profile[];siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void;onOpenPreviewWindow:(tripId:string)=>void;}){
   const [previewTrip,setPreviewTrip]=useState<Trip|null>(null);
+  const confirmDeleteTrip=(trip:Trip)=>{
+    const firstOk = window.confirm(`Delete trip "${trip.title}"? This cannot be undone.`);
+    if(!firstOk) return;
+    const secondOk = window.confirm(`Please reconfirm deleting "${trip.title}".`);
+    if(!secondOk) return;
+    onDelete(trip.id);
+  };
   const previewUser = useMemo<Profile>(()=>({
     id:"admin-preview-viewer",
     accountName:"ADMINP0000",
@@ -3696,7 +3745,7 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Btn th={th} v="sec" sz="sm" className="w-full sm:w-auto" onClick={()=>setPreviewTrip(tr)}>{t("overview")}</Btn>
           <Btn th={th} v="ghost" sz="sm" className="w-full sm:w-auto" onClick={()=>onOpenPreviewWindow(tr.id)}>Open Full Screen</Btn>
-          <Btn th={th} v="danger" sz="sm" className="w-full sm:w-auto" onClick={()=>onDelete(tr.id)}>{t("delete")}</Btn>
+          <Btn th={th} v="danger" sz="sm" className="w-full sm:w-auto" onClick={()=>confirmDeleteTrip(tr)}>{t("delete")}</Btn>
         </div>
       </div>
     </Card>)}
@@ -3730,6 +3779,13 @@ function AdminTrips({trips,profiles,siteCfg,th,t,onDelete,onOpenPreviewWindow}:{
 }
 
 function AdminTravelers({profiles,trips,th,t,onDelete}:{profiles:Profile[];trips:Trip[];th:ThemeMode;t:(k:TKey)=>string;onDelete:(id:string)=>void}){
+  const confirmDeleteTraveler=(profile:Profile)=>{
+    const firstOk = window.confirm(`Delete user "${dn(profile)}" (@${profile.accountName})?`);
+    if(!firstOk) return;
+    const secondOk = window.confirm(`Please reconfirm deleting "${dn(profile)}".`);
+    if(!secondOk) return;
+    onDelete(profile.id);
+  };
   return <div className="space-y-3">
     <p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{profiles.length} {t("adminTravelers")}</p>
     {profiles.length===0?<Empty icon="👥" title={t("noData")} desc="" th={th}/>
@@ -3746,7 +3802,7 @@ function AdminTravelers({profiles,trips,th,t,onDelete}:{profiles:Profile[];trips
               <p className={cx("text-sm",th==="dark"?"text-slate-500":"text-slate-400")}>{joined} {t("adminTrips")}</p>
             </div>
           </div>
-          <Btn th={th} v="danger" sz="sm" onClick={()=>onDelete(p.id)}>{t("remove")}</Btn>
+          <Btn th={th} v="danger" sz="sm" onClick={()=>confirmDeleteTraveler(p)}>{t("remove")}</Btn>
         </div>
       </Card>;
     })}
