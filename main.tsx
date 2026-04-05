@@ -58,6 +58,7 @@ type TransitLeg = { duration: string; details: string; };
 type ItineraryItem = {
   id: string; day: number; order: number; startTime: string; endTime: string; endDayOffset?: number; title: string; stopLocation: string; transport: string; details: string;
   photo?: string; mapUrl?: string; transitToNext?: TransitLeg; activityType?: "regular" | "free-time";
+  mediaSize?: "small" | "medium" | "large";
   freeTimeOwnerId?: string;
   freeTimeParticipantIds?: string[];
 };
@@ -195,6 +196,20 @@ const tripRoleLabel = (role:TripRole,t:(k:TKey)=>string)=>role==="owner"?t("role
 function calcDuration(s:string,e:string){
   if(!s||!e) return 1;
   return Math.max(1, Math.ceil((new Date(e).getTime()-new Date(s).getTime())/(864e5))+1);
+}
+
+function tripCountdownLabel(startDate:string, endDate:string, nowDate = new Date()){
+  const now = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const startOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const endOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const daysUntil = Math.ceil((startOnly.getTime() - now.getTime()) / 86400000);
+  if(daysUntil > 1) return `${daysUntil} days left`;
+  if(daysUntil === 1) return "1 day left";
+  if(daysUntil === 0) return "Starts today";
+  if(endOnly >= now) return "In progress";
+  return "Completed";
 }
 
 function usePersist<T>(key:string,init:T){
@@ -775,6 +790,7 @@ function normTrip(i:unknown):Trip{
       stopLocation: (item as ItineraryItem).stopLocation ?? "",
       photo: (item as ItineraryItem).photo ?? "",
       mapUrl: (item as ItineraryItem).mapUrl ?? "",
+      mediaSize: (item as ItineraryItem).mediaSize ?? "small",
       transitToNext: (item as ItineraryItem).transitToNext ?? { duration: "", details: "" },
       activityType: (item as ItineraryItem).activityType ?? ((item as ItineraryItem).transport === "Free Time" ? "free-time" : "regular"),
       freeTimeOwnerId: (item as ItineraryItem).freeTimeOwnerId ?? "",
@@ -1740,6 +1756,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
             <div className="flex-1">
               <p className="font-bold text-lg">{tr.title}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)}</p>
+              <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate)}</p>
             </div>
           </div>
         </Card>)}
@@ -1930,6 +1947,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
   const [noteText,setNoteText]=useState("");
   const [noteFiles,setNoteFiles]=useState<{url:string;name:string}[]>([]);
   const [urlInput,setUrlInput]=useState("");
+  const [editingNoteId,setEditingNoteId]=useState<string|null>(null);
+  const [editingNoteText,setEditingNoteText]=useState("");
 
   const memberProfiles=trip.members.map(id=>profiles.find(profile=>profile.id===id)).filter(Boolean) as Profile[];
   const flightLegs=trip.flightLegs.length>0?trip.flightLegs:[{
@@ -2032,6 +2051,19 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     onUpdate(trip.id,{travelNotes:trip.travelNotes.filter(n=>n.id!==nid)});
   };
 
+  const startEditNote=(note:TravelNote)=>{
+    if(!canEdit) return;
+    setEditingNoteId(note.id);
+    setEditingNoteText(note.text ?? "");
+  };
+
+  const saveEditedNote=()=>{
+    if(!canEdit || !editingNoteId) return;
+    onUpdate(trip.id,{travelNotes:trip.travelNotes.map(note=>note.id===editingNoteId?{...note,text:editingNoteText.trim()}:note)});
+    setEditingNoteId(null);
+    setEditingNoteText("");
+  };
+
   const showFlightSection=!isMobileScreen||mobileSection==="flight";
   const showHotelSection=!isMobileScreen||mobileSection==="hotel";
   const showNotesSection=!isMobileScreen||mobileSection==="notes";
@@ -2057,6 +2089,10 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("dates")}</p>
                 <p className="mt-2 text-lg font-semibold leading-snug">{fmtDate(trip.startDate)}<br />{fmtDate(trip.endDate)}</p>
+              </div>
+              <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
+                <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Countdown</p>
+                <p className="mt-2 text-lg font-semibold">{tripCountdownLabel(trip.startDate, trip.endDate)}</p>
               </div>
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
@@ -2192,9 +2228,20 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               <p className="font-semibold">{note.authorName}</p>
               <p className={cx("text-xs",th==="dark"?"text-slate-500":"text-slate-400")}>{new Date(note.createdAt).toLocaleString()}</p>
             </div>
-            <button onClick={()=>removeNote(note.id)} className="text-rose-400 opacity-70 hover:opacity-100" disabled={!canEdit}>✕</button>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>startEditNote(note)} className="opacity-70 hover:opacity-100" disabled={!canEdit}>✏️</button>
+              <button onClick={()=>removeNote(note.id)} className="text-rose-400 opacity-70 hover:opacity-100" disabled={!canEdit}>✕</button>
+            </div>
           </div>
-          {note.text&&<p className="mb-4 whitespace-pre-wrap">{note.text}</p>}
+          {editingNoteId===note.id
+            ? <div className="mb-4 space-y-2">
+                <Textarea th={th} value={editingNoteText} onChange={e=>setEditingNoteText(e.target.value)} className="min-h-24" disabled={!canEdit}/>
+                <div className="flex gap-2">
+                  <Btn th={th} sz="sm" onClick={saveEditedNote} disabled={!canEdit}>{t("save")}</Btn>
+                  <Btn th={th} v="sec" sz="sm" onClick={()=>{setEditingNoteId(null);setEditingNoteText("");}} disabled={!canEdit}>{t("cancel")}</Btn>
+                </div>
+              </div>
+            : (note.text&&<p className="mb-4 whitespace-pre-wrap">{note.text}</p>)}
           {note.attachments.length>0&&<div className="grid sm:grid-cols-2 gap-3">{note.attachments.map((att,index)=><a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noreferrer" download={att.name} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3 border transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06] text-cyan-300":"border-slate-200 bg-white hover:bg-slate-50 text-blue-700")}>
             <span className="truncate font-medium">{att.name}</span>
             <span className="text-xs uppercase tracking-[0.18em]">{t("downloadAttachment")}</span>
@@ -2257,7 +2304,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
       <div className="space-y-4">
         <div className="flex gap-2">
           <Input th={th} label={t("locationName")} value={customForm.query} onChange={e=>setCustomForm(f=>({...f,query:e.target.value}))} placeholder="City, country" className="flex-1"/>
-          <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("betterOutlook")}</Btn>
+          <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("searchLocation")}</Btn>
         </div>
         {searchResults.length>0&&<Select th={th} label="Matching Locations" value={customForm.selected ? `${customForm.selected.name}-${customForm.selected.lat}-${customForm.selected.lon}` : ""} onChange={e=>{
           const selected = searchResults.find(item=>`${item.name}-${item.lat}-${item.lon}`===e.target.value) ?? null;
@@ -2387,7 +2434,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
 }
 
 function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate,onTripUpdate}:{trip:Trip;user:Profile;profiles:Profile[];canEdit:boolean;canEditFreeTime:boolean;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(tid:string,items:ItineraryItem[])=>void;onTripUpdate:(id:string,d:Partial<Trip>)=>void}){
-  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,freeTimeParticipantIds:[] as string[]};
+  const emptyForm={startTime:"09:00",endTime:"10:00",endDayOffset:0,title:"",stopLocation:"",transport:"Activity",details:"",photo:"",mapUrl:"",activityType:"regular" as "regular"|"free-time"|"transport",timeMode:"timed" as "timed"|"whole-day",dayCount:1,mediaSize:"small" as "small"|"medium"|"large",freeTimeParticipantIds:[] as string[]};
   const ACTIVITY_TYPE_OPTIONS = [
     { value:"regular", label:t("activity") },
     { value:"transport", label:t("transport") },
@@ -2410,6 +2457,11 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const nextOrder=(trip.itinerary.filter(it=>it.day===day).reduce((max,it)=>Math.max(max,it.order),0))+1;
   const totalItems=trip.itinerary.length;
   const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
+  const mediaClassBySize: Record<"small"|"medium"|"large", string> = {
+    small: "h-28 sm:h-32",
+    medium: "h-40 sm:h-48",
+    large: "h-52 sm:h-64",
+  };
   const persistItems=(nextItems:ItineraryItem[])=>onUpdate(trip.id,nextItems);
 
   const saveActivity=async(e:React.FormEvent)=>{
@@ -2426,6 +2478,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       transport:transportLabel,
       details:form.details,
       photo:form.photo,
+      mediaSize: form.mediaSize,
       mapUrl:form.mapUrl||googleMapEmbedUrl(form.stopLocation),
       activityType:form.activityType,
       freeTimeOwnerId: form.activityType==="free-time" ? (editId ? trip.itinerary.find(it=>it.id===editId)?.freeTimeOwnerId || user.id : user.id) : "",
@@ -2463,7 +2516,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const edit=(it:ItineraryItem)=>{
     const mode=((it.startTime==="00:00"||it.startTime==="00:00:00")&&(it.endTime==="23:59"||it.endTime==="23:59:00"))?"whole-day":"timed";
     if(!canManageItem(it)) return;
-    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1,freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
+    setForm({ startTime:it.startTime,endTime:it.endTime,endDayOffset:it.endDayOffset??0,title:it.title,stopLocation:it.stopLocation ?? "",transport:it.transport,details:it.details,photo:it.photo??"",mapUrl:it.mapUrl??"",activityType:it.activityType??(it.transport==="Free Time"?"free-time":it.transport==="Transport"?"transport":"regular"),timeMode:mode,dayCount:(it.endDayOffset??0)+1,mediaSize:it.mediaSize??"small",freeTimeParticipantIds:[...(it.freeTimeParticipantIds ?? [])] });
     setEditId(it.id);
     setDay(it.day);
     setActivePane("schedule");
@@ -2552,8 +2605,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
-                {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="mt-3 h-40 w-full rounded-2xl border border-white/10"/>}
-                {it.photo&&<img src={it.photo} alt={it.title} className="mt-4 h-32 w-full rounded-2xl border border-white/10 object-cover"/>}
+                {it.mapUrl&&<iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className={cx("mt-3 w-full rounded-2xl border border-white/10",mediaClassBySize[it.mediaSize ?? "small"])}/>}
+                {it.photo&&<img src={it.photo} alt={it.title} className={cx("mt-4 w-full rounded-2xl border border-white/10 object-contain bg-slate-100/30",mediaClassBySize[it.mediaSize ?? "small"])}/>}
               </div>
               <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
@@ -2643,11 +2696,16 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         }}/>}
         <Input th={th} label={t("stopLocation")} value={form.stopLocation} onChange={e=>setForm(f=>({...f,stopLocation:e.target.value,mapUrl:googleMapEmbedUrl(e.target.value)}))}/>
         <Input th={th} label={t("googleMapUrl")} value={form.mapUrl} onChange={e=>setForm(f=>({...f,mapUrl:e.target.value}))}/>
-        {form.mapUrl&&<iframe src={form.mapUrl} title="activity-map-preview" loading="lazy" className="h-40 w-full rounded-2xl border border-white/10"/>}
+        <Select th={th} label="Media Size" value={form.mediaSize} onChange={e=>setForm(f=>({...f,mediaSize:e.target.value as "small"|"medium"|"large"}))}>
+          <option value="small">Small</option>
+          <option value="medium">Medium</option>
+          <option value="large">Large</option>
+        </Select>
+        {form.mapUrl&&<iframe src={form.mapUrl} title="activity-map-preview" loading="lazy" className={cx("w-full rounded-2xl border border-white/10",mediaClassBySize[form.mediaSize])}/>}
         <div className="space-y-2">
           <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>🖼 {t("uploadPhoto")}<input type="file" accept="image/*" onChange={handlePhotoUpload}/></label>
           <Input th={th} label={t("photoUrl")} value={form.photo} onChange={e=>setForm(f=>({...f,photo:e.target.value}))}/>
-          {form.photo&&<img src={form.photo} alt="preview" className="h-24 w-full rounded-2xl border border-white/10 object-cover"/>}
+          {form.photo&&<img src={form.photo} alt="preview" className={cx("w-full rounded-2xl border border-white/10 object-contain bg-slate-100/30",mediaClassBySize[form.mediaSize])}/>}
         </div>
         <Textarea th={th} label={t("remarks")} value={form.details} onChange={e=>setForm(f=>({...f,details:e.target.value}))}/>
         <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
@@ -3471,7 +3529,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
             <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="w-full"/>
-            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("betterOutlook")}</Btn>
+            <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("searchLocation")}</Btn>
           </div>
           {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
             <option value="">Select location</option>
@@ -3533,7 +3591,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     </div>
     {isOwner&&<div className={cx("rounded-2xl border p-4",th==="dark"?"border-rose-400/30 bg-rose-400/10":"border-rose-200 bg-rose-50")}>
       <p className={cx("mb-3 text-sm",th==="dark"?"text-rose-100":"text-rose-700")}>{t("ownerDeleteTripNote")}</p>
-      <Btn th={th} v="danger" type="button" onClick={removeTrip}>🗑️ {t("delete")} {t("tripName")}</Btn>
+      <Btn th={th} v="danger" type="button" onClick={removeTrip}>🗑️ delete trip</Btn>
     </div>}
   </Card>;
 }

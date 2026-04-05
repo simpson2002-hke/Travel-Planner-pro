@@ -99,7 +99,7 @@ const en = {
   orUrl: "or paste URL", imageUrl: "Image URL",
   noNotes: "No travel notes yet",
   noNotesDesc: "Add notes, photos, and links for this trip.",
-  weather: "Weather", refreshWeather: "Refresh", betterOutlook: "Better Outlook",
+  weather: "Weather", refreshWeather: "Refresh", betterOutlook: "Better Outlook", searchLocation: "Search Location",
   forecast7: "7-Day Forecast", monthlyHistory: "Monthly History (prev. year)",
   avgHigh: "Avg High", avgLow: "Avg Low", avgRain: "Avg Rain",
 
@@ -301,7 +301,7 @@ const zh: typeof en = {
   orUrl: "或貼上網址", imageUrl: "圖片網址",
   noNotes: "尚無旅行筆記",
   noNotesDesc: "為此旅程新增筆記、照片和連結。",
-  weather: "天氣", refreshWeather: "重新整理", betterOutlook: "更佳展望",
+  weather: "天氣", refreshWeather: "重新整理", betterOutlook: "更佳展望", searchLocation: "搜尋地點",
   forecast7: "7天天氣預報", monthlyHistory: "月均歷史 (去年)",
   avgHigh: "均高", avgLow: "均低", avgRain: "均雨量",
 
