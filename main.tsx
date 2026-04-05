@@ -230,6 +230,18 @@ const buildGmailComposeUrl = (to:string, subject:string, body:string)=>{
   });
   return `https://mail.google.com/mail/?${params.toString()}`;
 };
+const resolveReminderRecipients = (memberIds:string[], profiles:Profile[])=>memberIds
+  .map(id=>profiles.find(profile=>profile.id===id))
+  .filter((member):member is Profile=>Boolean(member?.email?.trim()))
+  .map(member=>member.email.trim());
+const openReminderDraftInGmail = ({memberIds,profiles,subjectTemplate,tripTitle,body}:{memberIds:string[];profiles:Profile[];subjectTemplate:string;tripTitle:string;body:string;})=>{
+  const recipients = resolveReminderRecipients(memberIds,profiles);
+  if(recipients.length===0) return false;
+  const subject = (subjectTemplate || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",tripTitle);
+  const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
+  window.open(gmailUrl,"_blank","noopener,noreferrer");
+  return true;
+};
 const toTimeMinutes = (time:string)=>{
   const [rawH,rawM] = (time || "").split(":");
   const h = Number(rawH);
@@ -2583,16 +2595,16 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   };
 
   const sendReminderEmail=()=>{
-    const recipients = trip.members
-      .map(id=>profiles.find(profile=>profile.id===id))
-      .filter((member):member is Profile=>Boolean(member?.email?.trim()))
-      .map(member=>member.email.trim());
-    if(recipients.length===0) return;
-    setSendingReminder(true);
-    const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",trip.title);
     const body = buildReminderBody();
-    const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
-    window.open(gmailUrl,"_blank","noopener,noreferrer");
+    const opened = openReminderDraftInGmail({
+      memberIds: trip.members,
+      profiles,
+      subjectTemplate: reminderTemplate.subject,
+      tripTitle: trip.title,
+      body,
+    });
+    if(!opened) return;
+    setSendingReminder(true);
     setTimeout(()=>setSendingReminder(false),500);
   };
   const visibleMemberStats=isMobileScreen
@@ -2707,7 +2719,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
             {sendingReminder ? "Preparing..." : "Send reminder draft"}
           </Btn>
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-            Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
+            Owners and editors can prepare a reminder email draft for all travellers. The draft opens in Gmail in a new tab.
           </p>
         </div>
       </div>}
@@ -3743,16 +3755,16 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     return lines.filter(Boolean).join("\n\n");
   };
   const sendReminderEmail=()=>{
-    const recipients = trip.members
-      .map(id=>profiles.find(profile=>profile.id===id))
-      .filter((member):member is Profile=>Boolean(member?.email?.trim()))
-      .map(member=>member.email.trim());
-    if(recipients.length===0) return;
-    setSendingReminder(true);
-    const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",form.title);
     const body = buildReminderBody();
-    const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
-    window.open(gmailUrl,"_blank","noopener,noreferrer");
+    const opened = openReminderDraftInGmail({
+      memberIds: trip.members,
+      profiles,
+      subjectTemplate: reminderTemplate.subject,
+      tripTitle: form.title,
+      body,
+    });
+    if(!opened) return;
+    setSendingReminder(true);
     setTimeout(()=>setSendingReminder(false),500);
   };
 
