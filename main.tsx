@@ -2586,10 +2586,6 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     if(reminderTemplate.includeNotesSummary){
       const noteTexts = trip.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
       if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
-      const attachmentLinks = trip.travelNotes.flatMap(note=>note.attachments.map(att=>`${att.name}: ${att.url}`));
-      if(attachmentLinks.length){
-        lines.push(`${t("reminderNotesLinks")}:\n${attachmentLinks.join("\n")}`);
-      }
     }
     return lines.filter(Boolean).join("\n\n");
   };
