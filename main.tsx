@@ -228,7 +228,7 @@ const buildGmailComposeUrl = (to:string, subject:string, body:string)=>{
     su: subject,
     body,
   });
-  return `https://mail.google.com/mail/u/0/?${params.toString()}`;
+  return `https://mail.google.com/mail/?${params.toString()}`;
 };
 const toTimeMinutes = (time:string)=>{
   const [rawH,rawM] = (time || "").split(":");
@@ -2599,7 +2599,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     const body = buildReminderBody();
     if(provider==="gmail"){
       const gmailUrl = buildGmailComposeUrl(to, subject, body);
-      window.open(gmailUrl,"_blank");
+      window.open(gmailUrl,"_blank","noopener,noreferrer");
     }else{
       const first = reminderRecipients[0]?.email?.trim() ?? "";
       const bcc = reminderRecipients.slice(1).map(member=>member.email.trim()).join(",");
@@ -3537,8 +3537,20 @@ function TripInstructions({th,t}:{th:ThemeMode;t:(k:TKey)=>string}){
 }
 
 function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;profiles:Profile[];canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
+  const normalizeSettingsFormTrip=(input:Trip)=>({
+    ...input,
+    flightLegs:Array.isArray(input.flightLegs)?input.flightLegs:[],
+    hotels:Array.isArray(input.hotels)?input.hotels:[],
+    itinerary:Array.isArray(input.itinerary)?input.itinerary:[],
+    travelNotes:Array.isArray(input.travelNotes)?input.travelNotes:[],
+    members:Array.isArray(input.members)?input.members:[],
+    expenses:Array.isArray(input.expenses)?input.expenses:[],
+    weatherLocations:Array.isArray(input.weatherLocations)?input.weatherLocations:undefined,
+    reminderTemplate:normalizeReminderTemplate(input.reminderTemplate),
+    bannerImageUrl:"",
+  });
   const isMobileScreen=useMobileScreen();
-  const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
+  const [form,setForm]=useState(()=>normalizeSettingsFormTrip(trip));
   const [saved,setSaved]=useState(false);
   const [bannerMessage,setBannerMessage]=useState("");
   const [flightMessage,setFlightMessage]=useState("");
@@ -3568,7 +3580,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     });
 
   useEffect(()=>{
-    setForm({...trip,bannerImageUrl:""});
+    setForm(normalizeSettingsFormTrip(trip));
     setHasUnsavedChanges(false);
     setExpandedFlightIds([]);
     setExpandedHotelIds([]);
@@ -3579,7 +3591,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     setSelectedWeatherResult("");
   },[trip]);
   useEffect(()=>{
-    const baseline = JSON.stringify({...trip,bannerImageUrl:""});
+    const baseline = JSON.stringify(normalizeSettingsFormTrip(trip));
     const current = JSON.stringify(form);
     setHasUnsavedChanges(current!==baseline);
   },[form,trip]);
