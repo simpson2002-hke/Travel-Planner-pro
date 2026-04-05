@@ -1665,11 +1665,16 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
     <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 sm:py-4 flex flex-wrap items-center justify-between gap-2">
       <h1 className="text-xl sm:text-2xl font-bold cursor-pointer break-words" onClick={()=>setView("user")}>✈ {siteName}</h1>
       <div className="flex w-full sm:w-auto min-w-0 items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-        <select value={lang} onChange={e=>setLang(e.target.value as Language)}
-          className={cx("rounded-full px-3 py-1.5 text-sm border outline-none transition",
-            th==="dark"?"border-white/10 bg-white/5 text-white":"border-slate-300 bg-white text-slate-900")}>
-          <option value="en" className="text-slate-900">EN</option><option value="zh" className="text-slate-900">中文</option>
-        </select>
+        <label className={cx("flex items-center gap-2 rounded-full border pl-3 pr-2 py-1.5 text-sm shrink-0",
+          th==="dark"?"border-white/15 bg-white/5 text-slate-200":"border-slate-300 bg-white text-slate-700")}>
+          <span>🌐</span>
+          <select value={lang} onChange={e=>setLang(e.target.value as Language)}
+            className={cx("bg-transparent outline-none font-medium pr-4",
+              th==="dark"?"text-white":"text-slate-900")}>
+            <option value="en" className="text-slate-900">{t("english")}</option>
+            <option value="zh" className="text-slate-900">{t("chinese")}</option>
+          </select>
+        </label>
         <button onClick={()=>setTh(th==="dark"?"light":"dark")}
           className={cx("w-10 h-10 rounded-full flex items-center justify-center text-xl transition",
             th==="dark"?"bg-white/5 hover:bg-white/10":"bg-slate-100 hover:bg-slate-200")}>
@@ -2354,7 +2359,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             <Badge label={`${hotels.length}`} th={th} color="green"/>
           </div>
           {hotels.length===0?<p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("noHotelDetails")}</p>
-          :<div className="space-y-5">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.9rem] border p-5 sm:p-7 min-h-0",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          :<div className="space-y-5">{hotels.map((hotel,index)=><div key={hotel.id} className={cx("rounded-[1.9rem] border p-5 sm:p-7 min-h-0 min-w-0 overflow-hidden",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <DetailHeader
               title={hotel.hotelName || `${t("hotelDetails")} ${index+1}`}
               subtitle={hotel.hotelAddress || "—"}
@@ -2398,7 +2403,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
           <button onClick={()=>setNoteFiles(files=>files.filter((_,fileIndex)=>fileIndex!==index))} className="text-rose-400" disabled={!canEdit}>✕</button>
         </div>)}</div>}
         {trip.travelNotes.length===0?<Empty icon="📝" title={t("noNotes")} desc={t("noNotesDesc")} th={th}/>
-        :<div className="space-y-4">{trip.travelNotes.map(note=><div key={note.id} className={cx("rounded-3xl p-5 border",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+        :<div className="space-y-4">{trip.travelNotes.map(note=><div key={note.id} className={cx("rounded-3xl p-5 border min-w-0 overflow-hidden",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
           <div className="mb-3 flex items-start justify-between gap-4">
             <div>
               <p className="font-semibold">{note.authorName}</p>
@@ -2417,9 +2422,9 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                   <Btn th={th} v="sec" sz="sm" onClick={()=>{setEditingNoteId(null);setEditingNoteText("");}} disabled={!canEdit}>{t("cancel")}</Btn>
                 </div>
               </div>
-            : (note.text&&<p className="mb-4 whitespace-pre-wrap">{note.text}</p>)}
+            : (note.text&&<p className="mb-4 whitespace-pre-wrap break-words">{note.text}</p>)}
           {note.attachments.length>0&&<div className="grid sm:grid-cols-2 gap-3">{note.attachments.map((att,index)=><a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noreferrer" download={att.name} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3 border transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06] text-cyan-300":"border-slate-200 bg-white hover:bg-slate-50 text-blue-700")}>
-            <span className="truncate font-medium">{att.name}</span>
+            <span className="truncate min-w-0 font-medium">{att.name}</span>
             <span className="text-xs uppercase tracking-[0.18em]">{t("downloadAttachment")}</span>
           </a>)}</div>}
         </div>)}</div>}
@@ -2531,13 +2536,8 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   const isMobileScreen=useMobileScreen();
   const [selectedMemberId,setSelectedMemberId]=useState(members[0]?.id ?? "");
   const [reminderOpen,setReminderOpen]=useState(false);
-  const [recipientIds,setRecipientIds]=useState<string[]>(()=>{
-    const withEmails = members.filter(member=>member.email?.trim()).map(member=>member.id);
-    return withEmails;
-  });
-  const [sendingVia,setSendingVia]=useState<"default"|"gmail"|null>(null);
+  const [sendingReminder,setSendingReminder]=useState(false);
   const reminderTemplate = normalizeReminderTemplate(trip.reminderTemplate);
-  const reminderRecipients = members.filter(member=>recipientIds.includes(member.id) && member.email?.trim());
   const setRole=(memberId:string,role:TripRole)=>{
     if(!isOwner || memberId===trip.ownerId) return;
     onUpdateTrip(trip.id,{memberRoles:{...(trip.memberRoles ?? {}),[memberId]:role}});
@@ -2559,15 +2559,6 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
       setSelectedMemberId(memberStats[0]?.member.id ?? "");
     }
   },[memberStats,selectedMemberId]);
-  useEffect(()=>{
-    const validIds = new Set(members.filter(member=>member.email?.trim()).map(member=>member.id));
-    setRecipientIds(current=>{
-      const kept = current.filter(id=>validIds.has(id));
-      if(kept.length>0) return kept;
-      return [...validIds];
-    });
-  },[members]);
-
   const buildReminderBody=()=>{
     const lines:string[]=[reminderTemplate.body.trim()];
     if(reminderTemplate.includeTripTitle) lines.push(`${t("reminderTripTitle")}: ${trip.title}`);
@@ -2591,21 +2582,18 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     return lines.filter(Boolean).join("\n\n");
   };
 
-  const sendReminder=(provider:"default"|"gmail")=>{
-    if(reminderRecipients.length===0) return;
-    setSendingVia(provider);
-    const to = reminderRecipients.map(member=>member.email.trim()).join(",");
+  const sendReminderEmail=()=>{
+    const recipients = trip.members
+      .map(id=>profiles.find(profile=>profile.id===id))
+      .filter((member):member is Profile=>Boolean(member?.email?.trim()))
+      .map(member=>member.email.trim());
+    if(recipients.length===0) return;
+    setSendingReminder(true);
     const subject = (reminderTemplate.subject || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",trip.title);
     const body = buildReminderBody();
-    if(provider==="gmail"){
-      const gmailUrl = buildGmailComposeUrl(to, subject, body);
-      window.open(gmailUrl,"_blank","noopener,noreferrer");
-    }else{
-      const first = reminderRecipients[0]?.email?.trim() ?? "";
-      const bcc = reminderRecipients.slice(1).map(member=>member.email.trim()).join(",");
-      window.open(`mailto:${first}?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,"_blank");
-    }
-    setTimeout(()=>setSendingVia(null),500);
+    const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
+    window.open(gmailUrl,"_blank","noopener,noreferrer");
+    setTimeout(()=>setSendingReminder(false),500);
   };
   const visibleMemberStats=isMobileScreen
     ? memberStats.filter(item=>item.member.id===selectedMemberId)
@@ -2698,17 +2686,6 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
         <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
           {t("reminderEmailHint")}
         </p>
-        <div className="grid sm:grid-cols-2 gap-2">
-          {members.map(member=><label key={`rem-${member.id}`} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
-            <input
-              type="checkbox"
-              checked={recipientIds.includes(member.id)}
-              disabled={!member.email?.trim() || !canManageReminder}
-              onChange={e=>setRecipientIds(current=>e.target.checked?[...new Set([...current,member.id])]:current.filter(id=>id!==member.id))}
-            />
-            <span className={cx(!member.email?.trim()&&"opacity-50")}>{dn(member)} {member.email?`(${member.email})`:`(${t("noEmail")})`}</span>
-          </label>)}
-        </div>
         <Input th={th} label={t("subjectTemplate")} value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})} disabled={!canManageReminder}/>
         <Textarea th={th} label={t("emailBodyTemplate")} value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28" disabled={!canManageReminder}/>
         <div className="grid sm:grid-cols-2 gap-2 text-sm">
@@ -2725,13 +2702,13 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
             {label}
           </label>)}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Btn th={th} v="sec" sz="sm" onClick={()=>sendReminder("default")} disabled={!canManageReminder||recipientIds.length===0||Boolean(sendingVia)}>
-            {sendingVia==="default"?t("opening"):t("openDefaultDraft")}
+        <div className="flex flex-wrap gap-2 items-center">
+          <Btn th={th} sz="sm" onClick={()=>sendReminderEmail()} disabled={!canManageReminder||sendingReminder}>
+            {sendingReminder ? "Preparing..." : "Send reminder draft"}
           </Btn>
-          <Btn th={th} sz="sm" onClick={()=>sendReminder("gmail")} disabled={!canManageReminder||recipientIds.length===0||Boolean(sendingVia)}>
-            {sendingVia==="gmail"?t("opening"):t("openGmailDraft")}
-          </Btn>
+          <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+            Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
+          </p>
         </div>
       </div>}
     </Card>
@@ -2919,21 +2896,21 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           </div>
           <div className="space-y-2 text-sm">
             {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>No activities for this traveler on Day {day}.</p>
-              :splitTimeline.map(entry=><p key={`it-${entry.item.id}`}>🗓️ {entry.item.startTime} {entry.item.title}</p>)}
+              :splitTimeline.map(entry=><p key={`it-${entry.item.id}`} className="break-words">🗓️ {entry.item.startTime} {entry.item.title}</p>)}
           </div>
         </div>
 
         <Tabs tabs={[{id:"schedule",label:t("itinerarySchedule"),icon:"🗓️"},{id:"saved",label:t("optionalPlaces"),icon:"📌"}]} active={activePane} onChange={setActivePane} th={th}/>
 
-        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative">
-          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
+        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative min-w-0">
+          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl min-w-0 overflow-hidden",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
             <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
               <div className="flex-1 min-w-0">
-                <div className="mb-2 flex items-start justify-between gap-3"><div><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold">{it.needsFollowUp?`“${it.title}”`:it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
+                <div className="mb-2 flex items-start justify-between gap-3"><div className="min-w-0"><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold break-words">{it.needsFollowUp?`“${it.title}”`:it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
                 {it.needsFollowUp&&<p className={cx("mb-2 rounded-xl border px-3 py-2 text-sm font-semibold",th==="dark"?"border-amber-200/40 bg-amber-300/10 text-amber-200":"border-amber-300 bg-amber-100 text-amber-800")}>⚠️ {t("followUpBadge")} {it.followUpNote ? `— “${it.followUpNote}”` : ""}</p>}
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
-                {it.details&&<p className={cx("text-sm leading-6",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
+                {it.details&&<p className={cx("text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
                 {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid gap-3",it.mapUrl&&it.photo?"grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
                   {it.mapUrl&&<div className={cx("overflow-hidden rounded-2xl border border-white/10",it.photo ? "aspect-square" : "aspect-[16/9] max-h-44")}>
@@ -4683,9 +4660,13 @@ export function App(){
       <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4">
         <span className="font-bold text-white text-2xl drop-shadow">✈ {siteCfg.siteName}</span>
         <div className="flex gap-2 items-center">
-          <select value={lang} onChange={e=>setLang(e.target.value as Language)} className="rounded-full px-3 py-2 text-sm bg-white/15 text-white border border-white/20 outline-none">
-            <option value="en" className="text-black">EN</option><option value="zh" className="text-black">中文</option>
-          </select>
+          <label className="flex items-center gap-2 rounded-full px-3 py-2 text-sm bg-white/15 text-white border border-white/20">
+            <span>🌐</span>
+            <select value={lang} onChange={e=>setLang(e.target.value as Language)} className="bg-transparent outline-none pr-3">
+              <option value="en" className="text-black">{t("english")}</option>
+              <option value="zh" className="text-black">{t("chinese")}</option>
+            </select>
+          </label>
           <button onClick={()=>setTheme(theme==="dark"?"light":"dark")} className="w-11 h-11 rounded-full bg-white/15 text-white flex items-center justify-center text-xl">{theme==="dark"?"☀️":"🌙"}</button>
           <button onClick={()=>setView("admin")} className="text-white/70 hover:text-white px-4 py-2 rounded-full border border-white/20 hover:bg-white/10 transition">{t("admin")}</button>
         </div>
