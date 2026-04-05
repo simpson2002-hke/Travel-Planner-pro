@@ -2087,7 +2087,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
     {tab==="itinerary"&&<TripItinerary trip={trip} user={user} profiles={profiles} canEdit={canManageItinerary} canEditFreeTime={!readOnly} th={th} t={t} onUpdate={onUpdateItin} onTripUpdate={onUpdate}/>}
     {tab==="expenses"&&<TripExpenses trip={trip} user={user} canEdit={canManageExpenses} profiles={profiles} th={th} t={t} onAdd={onAddExp} onUpdateExpense={onUpdateExp} onRemove={onRemoveExp}/>}
     {tab==="luggage"&&<TripLuggage trip={trip} user={user} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onAdd={onAddPack} onToggle={onTogglePack} onRemove={onRemovePack} onAddShared={onAddSharedPack} onRemoveShared={onRemoveSharedPack}/>}
-    {tab==="settings"&&<TripSettings trip={trip} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
+    {tab==="settings"&&<TripSettings trip={trip} profiles={profiles} canEdit={canManageSettings} isOwner={isOwner} siteCfg={siteCfg} th={th} t={t} onUpdate={onUpdate} onDeleteTrip={onDeleteTrip} onBack={onBack} onLeaveTrip={onLeaveTrip}/>}
     {tab==="instructions"&&<TripInstructions th={th} t={t}/>}
   </div>;
 }
@@ -3525,7 +3525,7 @@ function TripInstructions({th,t}:{th:ThemeMode;t:(k:TKey)=>string}){
   </Card>;
 }
 
-function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
+function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,onBack,onLeaveTrip}:{trip:Trip;profiles:Profile[];canEdit:boolean;isOwner:boolean;siteCfg:SiteSettings;th:ThemeMode;t:(k:TKey)=>string;onUpdate:(id:string,d:Partial<Trip>)=>void;onDeleteTrip:(id:string)=>void;onBack:()=>void;onLeaveTrip:(tripId:string)=>void;}){
   const isMobileScreen=useMobileScreen();
   const [form,setForm]=useState(()=>({...trip,bannerImageUrl:""}));
   const [saved,setSaved]=useState(false);
@@ -3546,6 +3546,7 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
   const [selectedWeatherResult,setSelectedWeatherResult]=useState<string>("");
   const [weatherStartDay,setWeatherStartDay]=useState(1);
   const [weatherEndDay,setWeatherEndDay]=useState(Math.max(1, trip.duration));
+  const [sendingReminder,setSendingReminder]=useState(false);
 
   useEffect(()=>{
     setForm({...trip,bannerImageUrl:""});
@@ -3712,6 +3713,9 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
     }));
     setSelectedWeatherResult("");
   };
+  const updateReminderTemplate = (patch:Partial<ReminderTemplate>)=>{
+    setForm(current=>({...current,reminderTemplate:{...normalizeReminderTemplate(current.reminderTemplate),...patch}}));
+  };
 
   const removeWeatherLocationPlan=(id:string)=>{
     setForm(f=>({...f, weatherLocations: (f.weatherLocations ?? []).filter(item=>item.id!==id)}));
@@ -3773,6 +3777,36 @@ function TripSettings({trip,canEdit,isOwner,siteCfg,th,t,onUpdate,onDeleteTrip,o
           </div>
         </div>
       </div>
+    </Card>
+    <Card th={th} className="p-5 sm:p-6 space-y-4 min-w-0 overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xl font-semibold">Email Reminder</h3>
+        <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void sendReminderEmail()} disabled={sendingReminder}>
+          {sendingReminder ? "Preparing..." : "Send reminder draft"}
+        </Btn>
+      </div>
+      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
+        Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
+      </p>
+      <Input th={th} label="Subject template" value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})}/>
+      <Textarea th={th} label="Email body template" value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28"/>
+      <div className="grid sm:grid-cols-2 gap-2 text-sm">
+        {[
+          ["Trip title","includeTripTitle"],
+          ["Trip dates","includeDates"],
+          ["Location","includeLocation"],
+          ["Trip ID","includeTripId"],
+          ["Flight summary","includeFlightSummary"],
+          ["Hotel summary","includeHotelSummary"],
+          ["Top travel notes","includeNotesSummary"],
+        ].map(([label,key])=><label key={key} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          <input type="checkbox" checked={Boolean(reminderTemplate[key as keyof ReminderTemplate])} onChange={e=>updateReminderTemplate({[key]:e.target.checked} as Partial<ReminderTemplate>)}/>
+          {label}
+        </label>)}
+      </div>
+      <p className={cx("text-xs",th==="dark"?"text-cyan-300":"text-blue-700")}>
+        Available sender accounts (owner/editor): {ownerOrEditors.map(person=>person.email || `@${person.accountName}`).join(", ") || "None"}
+      </p>
     </Card>
     {isMobileScreen&&<Card th={th} className="p-4">
       <Select th={th} label={t("moreSettings")} value={mobileDetailSection} onChange={e=>setMobileDetailSection(e.target.value as "none"|"flights"|"hotels"|"weather"|"banner")}>
