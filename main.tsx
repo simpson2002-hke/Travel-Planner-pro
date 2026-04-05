@@ -2743,6 +2743,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalForm,setOptionalForm]=useState(emptyOptionalForm);
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
+  const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
     : canEdit;
@@ -2809,6 +2810,20 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     [reordered[idx],reordered[swapWith]]=[reordered[swapWith],reordered[idx]];
     const orderMap=new Map(reordered.map((item,index)=>[item.id,index+1]));
     const next=trip.itinerary.map(it=>it.day===day?{...it,order:orderMap.get(it.id)??it.order}:it);
+    persistItems(sortItineraryByDayAndTime(next));
+  };
+
+  const swapDaySchedule=(targetDay:number)=>{
+    if(!canEdit || trip.duration < 2) return;
+    if(!Number.isInteger(targetDay) || targetDay < 1 || targetDay > trip.duration || targetDay===day){
+      window.alert(`Please enter a valid day number between 1 and ${trip.duration}, excluding Day ${day}.`);
+      return;
+    }
+    const next = trip.itinerary.map(item=>{
+      if(item.day===day) return {...item,day:targetDay};
+      if(item.day===targetDay) return {...item,day};
+      return item;
+    });
     persistItems(sortItineraryByDayAndTime(next));
   };
 
@@ -2880,6 +2895,15 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   useEffect(()=>{
     setOptionalForm(current=>current.day===day?current:{...current,day});
   },[day]);
+  useEffect(()=>{
+    if(trip.duration < 2){
+      setSwapTargetDay(1);
+      return;
+    }
+    if(swapTargetDay===day || swapTargetDay>trip.duration){
+      setSwapTargetDay(day===1 ? 2 : 1);
+    }
+  },[day,swapTargetDay,trip.duration]);
 
   return <div className="grid min-w-0 gap-6 lg:grid-cols-[1.45fr_.95fr]">
     <div className="space-y-5">
@@ -2892,9 +2916,29 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         </div>
       </Card>
 
-      <Card th={th} className="p-8 min-w-0 overflow-hidden">
-        <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-2">
+      <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
+        <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
+        </div>
+        <div className={cx("mb-6 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+          <p className="text-sm font-semibold">🔁 Swap this day itinerary</p>
+          <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+            You are viewing Day {day}. Choose another day to switch all activities.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <Select th={th} label="Swap with" value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full sm:max-w-[220px]">
+              {Array.from({length:trip.duration},(_,i)=>i+1)
+                .filter(d=>d!==day)
+                .map(d=><option key={`swap-${d}`} value={d}>{t("day")} {d}</option>)}
+            </Select>
+            <button
+              onClick={()=>swapDaySchedule(swapTargetDay)}
+              disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
+              className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition sm:mb-[1px]",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
+            >
+              Swap Day {day} ↔ Day {swapTargetDay}
+            </button>
+          </div>
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -2914,7 +2958,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 
         <Tabs tabs={[{id:"schedule",label:t("itinerarySchedule"),icon:"🗓️"},{id:"saved",label:t("optionalPlaces"),icon:"📌"}]} active={activePane} onChange={setActivePane} th={th}/>
 
-        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative min-w-0">
+        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5 max-w-full">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative min-w-0 max-w-full">
           {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl min-w-0 overflow-hidden",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
             <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
               <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
@@ -2924,7 +2968,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
-                {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid gap-3",it.mapUrl&&it.photo?"grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
+                {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid w-full max-w-full gap-3",it.mapUrl&&it.photo?"grid-cols-1 sm:grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
                   {it.mapUrl&&<div className={cx("overflow-hidden rounded-2xl border border-white/10",it.photo ? "aspect-square" : "aspect-[16/9] max-h-44")}>
                     <iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="h-full w-full"/>
                   </div>}
@@ -2933,7 +2977,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                   </div>}
                 </div>}
               </div>
-              <div className="flex gap-2 self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
+              <div className="flex w-full sm:w-auto gap-2 justify-end self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>}
