@@ -40,6 +40,7 @@ type PackingItem = {
   id: string; label: string; category: string; assignedTo: string; packed?: boolean;
   packedBy?: Record<string, boolean>;
   isSharedDefault?: boolean; createdById?: string;
+  isTemplateDefault?: boolean;
 };
 
 type LuggageCategory = { id: string; name: string; defaultItems: string[]; };
@@ -105,6 +106,8 @@ type Trip = {
   packingList: PackingItem[]; itinerary: ItineraryItem[]; optionalStops: OptionalStop[];
   freeTimeEntries: FreeTimeEntry[];
   reminderTemplate?: ReminderTemplate;
+  luggageTemplateVersion?: string;
+  luggageCustomized?: boolean;
   createdAt: string;
   customLocation?: {name:string;lat:number;lon:number};
   weatherLocations?: { id: string; label: string; startDay: number; endDay: number; location: GeoPoint }[];
@@ -197,6 +200,55 @@ const DEFAULT_REMINDER_TEMPLATE: ReminderTemplate = {
   includeHotelSummary: true,
   includeFlightSummary: true,
   includeNotesSummary: false,
+};
+const TEMPLATE_LUGGAGE_ASSIGNED_TO = "ALL_TRAVELERS";
+const templateItemKey = (category:string,label:string)=>`${category.trim().toLowerCase()}::${label.trim().toLowerCase()}`;
+const luggageTemplateVersion = (siteCfg:SiteSettings)=>{
+  const rows = (siteCfg.luggageCategories ?? [])
+    .map(category=>({
+      name: category.name.trim(),
+      items: [...(category.defaultItems ?? [])].map(item=>item.trim()).filter(Boolean).sort((a,b)=>a.localeCompare(b)),
+    }))
+    .sort((a,b)=>a.name.localeCompare(b.name))
+    .map(category=>`${category.name}:${category.items.join("|")}`);
+  return rows.join("||");
+};
+const buildTemplatePackingList = (siteCfg:SiteSettings, ownerId:string):PackingItem[]=>{
+  const seen = new Set<string>();
+  const rows: PackingItem[] = [];
+  for(const category of siteCfg.luggageCategories ?? []){
+    for(const label of category.defaultItems ?? []){
+      const cleanLabel = label.trim();
+      if(!cleanLabel) continue;
+      const key = templateItemKey(category.name, cleanLabel);
+      if(seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        id: uid("pk"),
+        label: cleanLabel,
+        category: category.name,
+        assignedTo: TEMPLATE_LUGGAGE_ASSIGNED_TO,
+        packedBy: {},
+        isSharedDefault: true,
+        isTemplateDefault: true,
+        createdById: ownerId,
+      });
+    }
+  }
+  return rows;
+};
+const isTemplateManagedItem = (item:PackingItem)=>Boolean(item.isTemplateDefault ?? (item.isSharedDefault && item.assignedTo===TEMPLATE_LUGGAGE_ASSIGNED_TO));
+const syncTripPackingWithCurrentTemplate = (trip:Trip, siteCfg:SiteSettings):Trip=>{
+  const nextVersion = luggageTemplateVersion(siteCfg);
+  if(trip.luggageCustomized) return { ...trip, luggageTemplateVersion: trip.luggageTemplateVersion ?? nextVersion };
+  if(trip.luggageTemplateVersion===nextVersion) return trip;
+  const retainedItems = (trip.packingList ?? []).filter(item=>!isTemplateManagedItem(item));
+  return {
+    ...trip,
+    packingList: [...buildTemplatePackingList(siteCfg, trip.ownerId), ...retainedItems],
+    luggageTemplateVersion: nextVersion,
+    luggageCustomized: false,
+  };
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════════
@@ -881,6 +933,7 @@ function normTrip(i:unknown):Trip{
         ? item.packedBy
         : (item.packed !== undefined ? {"legacy":Boolean(item.packed)} : {}),
       isSharedDefault: Boolean(item.isSharedDefault),
+      isTemplateDefault: Boolean(item.isTemplateDefault ?? (item.isSharedDefault && item.assignedTo===TEMPLATE_LUGGAGE_ASSIGNED_TO)),
       createdById: item.createdById ?? "",
     })):[],
     itinerary:rawItinerary.map((item,index)=>({
@@ -921,6 +974,8 @@ function normTrip(i:unknown):Trip{
     })) : [],
     createdAt:t.createdAt??new Date().toISOString(),
     reminderTemplate: normalizeReminderTemplate((t as Partial<Trip>).reminderTemplate),
+    luggageTemplateVersion: t.luggageTemplateVersion ?? "",
+    luggageCustomized: Boolean(t.luggageCustomized),
     customLocation:t.customLocation,
     weatherLocations: Array.isArray((t as Partial<Trip>).weatherLocations)
       ? (t as Partial<Trip>).weatherLocations!
@@ -4522,6 +4577,18 @@ export function App(){
   const t=useT(lang);
 
   useEffect(()=>{setProfiles(c=>c.map(normProfile));setTrips(c=>c.map(normTrip));setSiteCfg(c=>normSite(c));},[]);
+  useEffect(()=>{
+    if(!tripsMeta.hydrated || !siteCfgMeta.hydrated) return;
+    setTrips(currentTrips=>{
+      let changed = false;
+      const nextTrips = currentTrips.map(trip=>{
+        const synced = syncTripPackingWithCurrentTemplate(trip, siteCfg);
+        if(synced !== trip) changed = true;
+        return synced;
+      });
+      return changed ? nextTrips : currentTrips;
+    });
+  },[setTrips,siteCfg,siteCfgMeta.hydrated,tripsMeta.hydrated]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
 
   const sharedSyncReady = profilesMeta.hydrated && tripsMeta.hydrated && adminPwMeta.hydrated && siteCfgMeta.hydrated;
@@ -4580,11 +4647,7 @@ export function App(){
   const createTrip=(d:{title:string;location:string;startDate:string;endDate:string})=>{
     if(!user)return;
     const dur=calcDuration(d.startDate,d.endDate);
-    const cats=siteCfg.luggageCategories||[];
-    const packing:PackingItem[]=cats.flatMap(c=>c.defaultItems.map(l=>({
-      id:uid("pk"),label:l,category:c.name,assignedTo:"ALL_TRAVELERS",packed:false,isSharedDefault:true,createdById:user.id,
-      packedBy:{},
-    })));
+    const packing = buildTemplatePackingList(siteCfg, user.id);
     const trip:Trip={
       id:tripCode(),ownerId:user.id,ownerName:dn(user),
       title:d.title,location:d.location,startDate:d.startDate,endDate:d.endDate,duration:dur,
@@ -4594,6 +4657,8 @@ export function App(){
       bannerColor:"#2563eb",bannerImage:"",memberRoles:{[user.id]:"owner"},members:[user.id],expenses:[],
       itineraryChecklists:{[user.id]:{}},packingList:packing,
       itinerary:[],optionalStops:[],freeTimeEntries:[],createdAt:new Date().toISOString(),
+      luggageTemplateVersion: luggageTemplateVersion(siteCfg),
+      luggageCustomized: false,
     };
     setTrips(c=>[trip,...c]);
   };
@@ -4618,20 +4683,20 @@ export function App(){
   const removeExpense=(tid:string,eid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,expenses:t.expenses.filter(e=>e.id!==eid)}:t));
   const addPack=(tid:string,l:string,cat:string)=>{
     if(!user)return;
-    setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:dn(user),packedBy:{[user.id]:false},createdById:user.id}]}:t));
+    setTrips(c=>c.map(t=>t.id===tid?{...t,luggageCustomized:true,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:dn(user),packedBy:{[user.id]:false},createdById:user.id,isTemplateDefault:false}]}:t));
   };
   const togglePack=(tid:string,iid:string)=>{
     if(!user) return;
     setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:t.packingList.map(i=>i.id===iid?{...i,packedBy:{...(i.packedBy ?? {}),[user.id]:!(i.packedBy?.[user.id] ?? i.packedBy?.legacy ?? i.packed)}}:i)}:t));
   };
-  const removePack=(tid:string,iid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,packingList:t.packingList.filter(i=>i.id!==iid)}:t));
+  const removePack=(tid:string,iid:string)=>setTrips(c=>c.map(t=>t.id===tid?{...t,luggageCustomized:true,packingList:t.packingList.filter(i=>i.id!==iid)}:t));
   const addSharedPack=(tid:string,l:string,cat:string)=>{
     if(!user)return;
-    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:"ALL_TRAVELERS",packedBy:{},isSharedDefault:true,createdById:user.id}]}:t));
+    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,luggageCustomized:true,packingList:[...t.packingList,{id:uid("pk"),label:l,category:cat,assignedTo:TEMPLATE_LUGGAGE_ASSIGNED_TO,packedBy:{},isSharedDefault:true,isTemplateDefault:false,createdById:user.id}]}:t));
   };
   const removeSharedPack=(tid:string,iid:string)=>{
     if(!user)return;
-    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,packingList:t.packingList.filter(i=>!(i.id===iid&&i.isSharedDefault))}:t));
+    setTrips(c=>c.map(t=>t.id===tid&&t.ownerId===user.id?{...t,luggageCustomized:true,packingList:t.packingList.filter(i=>!(i.id===iid&&i.isSharedDefault))}:t));
   };
   const updateItin=(tid:string,items:ItineraryItem[])=>setTrips(c=>c.map(t=>t.id===tid?{...t,itinerary:items}:t));
   const leaveTrip=(tripId:string)=>{
