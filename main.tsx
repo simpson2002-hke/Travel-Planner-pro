@@ -1450,15 +1450,7 @@ function readFile(file:File):Promise<string>{
 async function readImageFile(file:File,{maxDimension=1600,maxBytes=350_000}:{maxDimension?:number;maxBytes?:number}={}):Promise<string>{
   const raw = await readFile(file);
   if(file.type.startsWith("image/svg")) return raw;
-
-  const loadImage = (src:string)=>new Promise<HTMLImageElement>((resolve,reject)=>{
-    const img = new Image();
-    img.onload = ()=>resolve(img);
-    img.onerror = ()=>reject(new Error("Failed to decode image."));
-    img.src = src;
-  });
-
-  const img = await loadImage(raw);
+  const img = await loadImageFromSource(raw);
   const scale = Math.min(1,maxDimension/Math.max(img.width,img.height));
   const width = Math.max(1,Math.round(img.width*scale));
   const height = Math.max(1,Math.round(img.height*scale));
@@ -1478,6 +1470,50 @@ async function readImageFile(file:File,{maxDimension=1600,maxBytes=350_000}:{max
 
   if(compressed.length > maxBytes){
     throw new Error("Banner image is too large. Please use a smaller image.");
+  }
+  return compressed;
+}
+
+function loadImageFromSource(src:string){
+  return new Promise<HTMLImageElement>((resolve,reject)=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = ()=>reject(new Error("Failed to decode image."));
+    img.src = src;
+  });
+}
+
+function clampCropOffset(offset:number,imageEdge:number,canvasEdge:number){
+  const maxOffset = Math.max(0,(imageEdge - canvasEdge)/2);
+  return Math.max(-maxOffset,Math.min(maxOffset,offset));
+}
+
+async function renderCircularAvatar(source:string,{size=320,zoom=1,offsetX=0,offsetY=0,maxBytes=110_000}:{size?:number;zoom?:number;offsetX?:number;offsetY?:number;maxBytes?:number}={}){
+  const img = await loadImageFromSource(source);
+  const baseScale = size / Math.max(1,Math.min(img.width,img.height));
+  const drawScale = Math.max(1,zoom) * baseScale;
+  const drawW = img.width * drawScale;
+  const drawH = img.height * drawScale;
+  const clampedX = clampCropOffset(offsetX,drawW,size);
+  const clampedY = clampCropOffset(offsetY,drawH,size);
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if(!ctx) return source;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(size/2,size/2,size/2,0,Math.PI*2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.drawImage(img,(size-drawW)/2 + clampedX,(size-drawH)/2 + clampedY,drawW,drawH);
+  ctx.restore();
+
+  let quality = 0.92;
+  let compressed = canvas.toDataURL("image/jpeg",quality);
+  while(compressed.length > maxBytes && quality > 0.35){
+    quality = +(quality - 0.08).toFixed(2);
+    compressed = canvas.toDataURL("image/jpeg",quality);
   }
   return compressed;
 }
@@ -1697,22 +1733,58 @@ function Avatar({name,th,icon,iconImage}:{name:string;th:ThemeMode;icon?:string;
 
 function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageChange}:{th:ThemeMode;t:(k:TKey)=>string;label:string;emojiValue:string;imageValue?:string;onEmojiChange:(value:string)=>void;onImageChange:(value:string)=>void}){
   const [avatarSize,setAvatarSize]=useState(320);
-  const [sourceImage,setSourceImage]=useState<File|null>(null);
-  const processImage = useCallback(async(file:File,size:number)=>{
-    const resized = await readImageFile(file,{maxDimension:size,maxBytes:110_000});
+  const PREVIEW_SIZE = 220;
+  const [sourceImage,setSourceImage]=useState<string>("");
+  const [sourceMeta,setSourceMeta]=useState<{width:number;height:number}|null>(null);
+  const [zoom,setZoom]=useState(1);
+  const [offsetX,setOffsetX]=useState(0);
+  const [offsetY,setOffsetY]=useState(0);
+  const dragState = useRef<{startX:number;startY:number;baseX:number;baseY:number;pointerId:number}|null>(null);
+  const getOffsetLimit = useCallback((meta:{width:number;height:number}|null,nextZoom:number)=>{
+    if(!meta) return {x:0,y:0};
+    const baseScale = PREVIEW_SIZE / Math.max(1,Math.min(meta.width,meta.height));
+    const drawW = meta.width * baseScale * nextZoom;
+    const drawH = meta.height * baseScale * nextZoom;
+    return {
+      x:Math.max(0,(drawW-PREVIEW_SIZE)/2),
+      y:Math.max(0,(drawH-PREVIEW_SIZE)/2),
+    };
+  },[]);
+  const clampOffsets = useCallback((nextX:number,nextY:number,nextZoom=zoom)=>{
+    const limit = getOffsetLimit(sourceMeta,nextZoom);
+    return {
+      x: Math.max(-limit.x,Math.min(limit.x,nextX)),
+      y: Math.max(-limit.y,Math.min(limit.y,nextY)),
+    };
+  },[getOffsetLimit,sourceMeta,zoom]);
+  const processImage = useCallback(async(source:string,size:number,cropZoom:number,cropX:number,cropY:number)=>{
+    const resized = await renderCircularAvatar(source,{size,zoom:cropZoom,offsetX:cropX,offsetY:cropY,maxBytes:110_000});
     onImageChange(resized);
   },[onImageChange]);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file = e.target.files?.[0];
     if(!file) return;
-    setSourceImage(file);
-    await processImage(file,avatarSize);
+    const raw = await readFile(file);
+    setSourceImage(raw);
+    setZoom(1);
+    setOffsetX(0);
+    setOffsetY(0);
     e.target.value = "";
   };
   useEffect(()=>{
+    if(!sourceImage){
+      setSourceMeta(null);
+      return;
+    }
+    void loadImageFromSource(sourceImage).then(img=>setSourceMeta({width:img.width,height:img.height})).catch(()=>setSourceMeta(null));
+  },[sourceImage]);
+  useEffect(()=>{
     if(!sourceImage) return;
-    void processImage(sourceImage,avatarSize);
-  },[avatarSize,processImage,sourceImage]);
+    const clamped = clampOffsets(offsetX,offsetY,zoom);
+    if(clamped.x!==offsetX) setOffsetX(clamped.x);
+    if(clamped.y!==offsetY) setOffsetY(clamped.y);
+    void processImage(sourceImage,avatarSize,zoom,clamped.x,clamped.y);
+  },[avatarSize,clampOffsets,offsetX,offsetY,processImage,sourceImage,zoom]);
   return <div className="space-y-3">
     <span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>
     <div className="flex flex-wrap gap-2">
@@ -1734,6 +1806,59 @@ function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageCha
       <input type="range" min={96} max={512} step={16} value={avatarSize} onChange={e=>setAvatarSize(Number(e.target.value)||320)} className="flex-1"/>
       <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{avatarSize}px</span>
     </label>
+    {sourceImage&&<div className="space-y-3">
+      <label className="flex items-center gap-3 text-sm">
+        <span className={th==="dark"?"text-slate-400":"text-slate-600"}>{t("zoom")}</span>
+        <input type="range" min={1} max={3} step={0.05} value={zoom} onChange={e=>{
+          const nextZoom = Number(e.target.value) || 1;
+          const clamped = clampOffsets(offsetX,offsetY,nextZoom);
+          setZoom(nextZoom);
+          setOffsetX(clamped.x);
+          setOffsetY(clamped.y);
+        }} className="flex-1"/>
+        <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{zoom.toFixed(2)}x</span>
+      </label>
+      <div>
+        <p className={cx("mb-2 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Drag image to adjust circular extraction.</p>
+        <div
+          className={cx("relative mx-auto overflow-hidden rounded-full border-2 touch-none",th==="dark"?"border-cyan-300/70 bg-black/20":"border-slate-400 bg-slate-100")}
+          style={{width:PREVIEW_SIZE,height:PREVIEW_SIZE}}
+          onPointerDown={e=>{
+            dragState.current = {startX:e.clientX,startY:e.clientY,baseX:offsetX,baseY:offsetY,pointerId:e.pointerId};
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
+          onPointerMove={e=>{
+            if(!dragState.current || dragState.current.pointerId!==e.pointerId) return;
+            const dx = e.clientX - dragState.current.startX;
+            const dy = e.clientY - dragState.current.startY;
+            const clamped = clampOffsets(dragState.current.baseX + dx,dragState.current.baseY + dy);
+            setOffsetX(clamped.x);
+            setOffsetY(clamped.y);
+          }}
+          onPointerUp={e=>{
+            if(dragState.current?.pointerId===e.pointerId){
+              e.currentTarget.releasePointerCapture(e.pointerId);
+              dragState.current = null;
+            }
+          }}
+          onPointerCancel={()=>{dragState.current = null;}}
+        >
+          {sourceMeta&&<img
+            src={sourceImage}
+            alt="Avatar crop source"
+            draggable={false}
+            className="pointer-events-none select-none absolute max-w-none"
+            style={{
+              width:sourceMeta.width * (PREVIEW_SIZE / Math.max(1,Math.min(sourceMeta.width,sourceMeta.height))) * zoom,
+              height:sourceMeta.height * (PREVIEW_SIZE / Math.max(1,Math.min(sourceMeta.width,sourceMeta.height))) * zoom,
+              left:"50%",
+              top:"50%",
+              transform:`translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))`,
+            }}
+          />}
+        </div>
+      </div>
+    </div>}
     {(emojiValue || imageValue) && <div className="flex items-center gap-3">
       <Avatar name="Preview User" icon={emojiValue} iconImage={imageValue} th={th}/>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("preview")}</p>
@@ -3022,26 +3147,6 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
         </div>
-        <div className={cx("mb-6 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
-          <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
-          <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-            {t("swapItineraryHelp").replace("{day}",String(day))}
-          </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full sm:max-w-[220px]">
-              {Array.from({length:trip.duration},(_,i)=>i+1)
-                .filter(d=>d!==day)
-                .map(d=><option key={`swap-${d}`} value={d}>{t("day")} {d}</option>)}
-            </Select>
-            <button
-              onClick={()=>swapDaySchedule(swapTargetDay)}
-              disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
-              className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition sm:mb-[1px]",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
-            >
-              {t("swapDayButton").replace("{dayA}",String(day)).replace("{dayB}",String(swapTargetDay))}
-            </button>
-          </div>
-        </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold">{t("splitTimelineByTraveler")}</p>
@@ -3083,9 +3188,6 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             </div>
           </Card>
         </div>)}</div>}
-          <div className={cx("mt-6 rounded-2xl border p-4 text-sm",th==="dark"?"border-amber-300/30 bg-amber-300/10 text-amber-100":"border-amber-300 bg-amber-50 text-amber-800")}>
-            💡 {t("freeTime")} is now an activity category. Choose it via Activity Type.
-          </div>
         </>) : (<div className="mt-6 space-y-4">
           {optionalDayItems.length===0?<Empty icon="📌" title={t("noOptionalPlaces")} desc={t("noOptionalPlacesDesc")} th={th}/>:optionalDayItems.map(stop=><Card key={stop.id} th={th} className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3110,6 +3212,26 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     </div>
 
     <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
+      <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+        <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
+        <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+          {t("swapItineraryHelp").replace("{day}",String(day))}
+        </p>
+        <div className="mt-3 flex flex-col gap-2">
+          <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))}>
+            {Array.from({length:trip.duration},(_,i)=>i+1)
+              .filter(d=>d!==day)
+              .map(d=><option key={`swap-sidebar-${d}`} value={d}>{t("day")} {d}</option>)}
+          </Select>
+          <button
+            onClick={()=>swapDaySchedule(swapTargetDay)}
+            disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
+            className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
+          >
+            {t("swapDayButton").replace("{dayA}",String(day)).replace("{dayB}",String(swapTargetDay))}
+          </button>
+        </div>
+      </div>
       {!canEdit&&<p className={cx("mb-3 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Only owner/editor can edit shared itinerary details. You can still manage your own free-time plans.</p>}
       <div className="mb-4">
         <h3 className="text-xl font-bold">{activePane==="schedule" ? (editId?t("edit"):t("addActivity")) : (optionalEditId?t("editOptionalPlace"):t("addOptionalPlace"))}</h3>
@@ -3698,8 +3820,6 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   const [flightSearchingId,setFlightSearchingId]=useState<string|null>(null);
   const [hotelSearchingId,setHotelSearchingId]=useState<string|null>(null);
   const [hasUnsavedChanges,setHasUnsavedChanges]=useState(false);
-  const [quickFlightNumber,setQuickFlightNumber]=useState("");
-  const [quickHotelQuery,setQuickHotelQuery]=useState("");
   const [mobileDetailSection,setMobileDetailSection]=useState<"none"|"flights"|"hotels"|"weather"|"banner">("none");
   const [expandedFlightIds,setExpandedFlightIds]=useState<string[]>([]);
   const [expandedHotelIds,setExpandedHotelIds]=useState<string[]>([]);
@@ -3791,18 +3911,10 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   };
 
   const updateLeg=(legId:string,patch:Partial<FlightLeg>)=>setForm(f=>({...f,flightLegs:f.flightLegs.map(leg=>leg.id===legId?{...leg,...patch}:leg)}));
-  const addLeg=async()=>{
-    const leg={id:uid("flt"),airline:"",flightNumber:quickFlightNumber.trim(),departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",notes:""};
+  const addLeg=()=>{
+    const leg={id:uid("flt"),airline:"",flightNumber:"",departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",notes:""};
     setForm(f=>({...f,flightLegs:[leg,...f.flightLegs]}));
     setExpandedFlightIds(ids=>[leg.id,...ids]);
-    if(!quickFlightNumber.trim())return;
-    setFlightSearchingId(leg.id);
-    try{
-      const suggestion=await searchFlightByNumber(siteCfg,quickFlightNumber);
-      if(!suggestion){setFlightMessage(t("autoFillNoMatch"));return;}
-      updateLeg(leg.id,{...suggestion,flightNumber:quickFlightNumber.trim()});
-      setFlightMessage(t("flightAutoFilled"));
-    }finally{setFlightSearchingId(null);}
   };
   const removeLeg=(legId:string)=>{
     setForm(f=>({...f,flightLegs:f.flightLegs.filter(leg=>leg.id!==legId)}));
@@ -3817,45 +3929,6 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   const removeHotel=(hotelId:string)=>{
     setForm(f=>({...f,hotels:f.hotels.filter(hotel=>hotel.id!==hotelId)}));
     setExpandedHotelIds(ids=>ids.filter(id=>id!==hotelId));
-  };
-
-  const ensureFirstLeg=()=>{
-    if(form.flightLegs.length>0)return form.flightLegs[0];
-    const created={id:uid("flt"),airline:"",flightNumber:quickFlightNumber.trim(),departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",notes:""};
-    setForm(f=>({...f,flightLegs:[created,...f.flightLegs]}));
-    return created;
-  };
-
-  const ensureFirstHotel=()=>{
-    if(form.hotels.length>0)return form.hotels[0];
-    const created={id:uid("htl"),hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",contact:"",notes:""};
-    setForm(f=>({...f,hotels:[created,...f.hotels]}));
-    return created;
-  };
-
-  const quickSearchFlight=async()=>{
-    if(!quickFlightNumber.trim()){setFlightMessage(t("flightNumberRequired"));return;}
-    const target=form.flightLegs.length>0?form.flightLegs[0]:ensureFirstLeg();
-    setFlightSearchingId(target.id);
-    try{
-      const suggestion=await searchFlightByNumber(siteCfg,quickFlightNumber);
-      if(!suggestion){setFlightMessage(t("autoFillNoMatch"));return;}
-      updateLeg(target.id,{...suggestion,flightNumber:quickFlightNumber.trim()});
-      setFlightMessage(t("flightAutoFilled"));
-    }finally{setFlightSearchingId(null);}
-  };
-
-  const quickSearchHotel=async()=>{
-    if(!quickHotelQuery.trim()&&!trip.location.trim()){setHotelMessage(t("hotelSearchHint"));return;}
-    const target=ensureFirstHotel();
-    setHotelSearchingId(target.id);
-    try{
-      const baseName=quickHotelQuery.trim()||target.hotelName;
-      const suggestion=await searchHotelByQuery(siteCfg,baseName,trip.location);
-      if(!suggestion){setHotelMessage(t("autoFillNoMatch"));return;}
-      updateHotel(target.id,{hotelName:suggestion.hotelName||baseName,hotelAddress:suggestion.hotelAddress||target.hotelAddress,roomType:suggestion.roomType||target.roomType,contact:suggestion.contact||target.contact});
-      setHotelMessage(t("hotelAutoFilled"));
-    }finally{setHotelSearchingId(null);}
   };
 
   const searchWeatherLocations=async()=>{
@@ -3962,25 +4035,6 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
       <h2 className="text-2xl font-bold">{t("tripDetails")}</h2>
       <Btn th={th} onClick={save} className="!bg-emerald-500 !text-white hover:!bg-emerald-400 !shadow-lg shadow-emerald-500/30">💾 {t("save")}</Btn>
     </div>
-    <Card th={th} className="p-5 sm:p-6 space-y-4">
-      <h3 className="text-xl font-semibold">{t("quickSearch")}</h3>
-      <div className="grid lg:grid-cols-2 gap-3 sm:gap-4">
-        <div className={cx("rounded-2xl p-4 space-y-3",th==="dark"?"bg-white/[0.03]":"bg-slate-50")}>
-          <p className={cx("text-sm font-medium",th==="dark"?"text-slate-300":"text-slate-700")}>{t("quickFlightSearch")}</p>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Input th={th} value={quickFlightNumber} onChange={e=>setQuickFlightNumber(e.target.value)} placeholder={t("flightNumber")} className="flex-1"/>
-            <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void quickSearchFlight()} disabled={Boolean(flightSearchingId)}>{flightSearchingId?t("loading"):t("search")}</Btn>
-          </div>
-        </div>
-        <div className={cx("rounded-2xl p-4 space-y-3",th==="dark"?"bg-white/[0.03]":"bg-slate-50")}>
-          <p className={cx("text-sm font-medium",th==="dark"?"text-slate-300":"text-slate-700")}>{t("quickHotelSearch")}</p>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Input th={th} value={quickHotelQuery} onChange={e=>setQuickHotelQuery(e.target.value)} placeholder={t("hotelName")} className="flex-1"/>
-            <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void quickSearchHotel()} disabled={Boolean(hotelSearchingId)}>{hotelSearchingId?t("loading"):t("search")}</Btn>
-          </div>
-        </div>
-      </div>
-    </Card>
     <Card th={th} className="p-5 sm:p-6 space-y-4 min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-xl font-semibold">{t("reminderEmailCard")}</h3>

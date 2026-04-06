@@ -258,6 +258,7 @@ const en = {
   uploadIcon: "Upload icon",
   removeImage: "Remove image",
   resize: "Resize",
+  zoom: "Zoom",
   preview: "Preview",
 };
 
@@ -519,6 +520,7 @@ const zh: typeof en = {
   uploadIcon: "上傳頭像",
   removeImage: "移除圖片",
   resize: "調整大小",
+  zoom: "縮放",
   preview: "預覽",
 };
 
