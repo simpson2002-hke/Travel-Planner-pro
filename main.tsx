@@ -143,6 +143,15 @@ type SharedPersistMeta = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
+const EXPENSE_CAT_LABEL_KEY: Record<string, TKey> = {
+  Food: "expenseCatFood",
+  Transport: "expenseCatTransport",
+  Accommodation: "expenseCatAccommodation",
+  Activities: "expenseCatActivities",
+  Shopping: "expenseCatShopping",
+  Other: "expenseCatOther",
+};
+const expenseCategoryLabel = (category:string,t:(k:TKey)=>string)=>EXPENSE_CAT_LABEL_KEY[category] ? t(EXPENSE_CAT_LABEL_KEY[category]) : category;
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
   45:"Fog",48:"Rime fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
@@ -343,18 +352,19 @@ function calcDuration(s:string,e:string){
   return Math.max(1, Math.ceil((new Date(e).getTime()-new Date(s).getTime())/(864e5))+1);
 }
 
-function tripCountdownLabel(startDate:string, endDate:string, nowDate = new Date()){
+function tripCountdownLabel(startDate:string, endDate:string, t?:(k:TKey)=>string, nowDate = new Date()){
   const now = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
   const start = new Date(startDate);
   const end = new Date(endDate);
   const startOnly = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const endOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
   const daysUntil = Math.ceil((startOnly.getTime() - now.getTime()) / 86400000);
-  if(daysUntil > 1) return `${daysUntil} days left`;
-  if(daysUntil === 1) return "1 day left";
-  if(daysUntil === 0) return "Starts today";
-  if(endOnly >= now) return "In progress";
-  return "Completed";
+  if(daysUntil > 1) return t ? t("daysLeft").replace("{count}",String(daysUntil)) : `${daysUntil} days left`;
+  if(daysUntil === 1) return t ? t("startsTomorrow") : "1 day left";
+  if(daysUntil === 0) return t ? t("startsToday") : "Starts today";
+  if(endOnly >= now) return t ? t("inProgress") : "In progress";
+  const daysAgo = Math.max(1, Math.ceil((now.getTime()-endOnly.getTime())/86400000));
+  return t ? t("endedDaysAgo").replace("{count}",String(daysAgo)) : "Completed";
 }
 
 function usePersist<T>(key:string,init:T){
@@ -1140,7 +1150,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("flightLegs"))}</div><div class="value">${escapeHtml(String(trip.flightLegs.length || 0))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("hotelStays"))}</div><div class="value">${escapeHtml(String(trip.hotels.length || 0))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("members"))}</div><div class="value">${escapeHtml(members.map(member=>dn(member)).join(", ") || "—")}</div></div>
-        <div class="tile"><div class="label">Countdown</div><div class="value">${escapeHtml(tripCountdownLabel(trip.startDate, trip.endDate))}</div></div>
+        <div class="tile"><div class="label">${escapeHtml(t("countdown"))}</div><div class="value">${escapeHtml(tripCountdownLabel(trip.startDate, trip.endDate, t))}</div></div>
         <div class="tile"><div class="label">${escapeHtml(t("optionalPlaces"))}</div><div class="value">${escapeHtml(String(trip.optionalStops.length || 0))}</div></div>
       </div>
     </section>` : ""}
@@ -1662,15 +1672,24 @@ function Avatar({name,th,icon,iconImage}:{name:string;th:ThemeMode;icon?:string;
   </div>;
 }
 
-function AvatarPicker({th,label,emojiValue,imageValue,onEmojiChange,onImageChange}:{th:ThemeMode;label:string;emojiValue:string;imageValue?:string;onEmojiChange:(value:string)=>void;onImageChange:(value:string)=>void}){
+function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageChange}:{th:ThemeMode;t:(k:TKey)=>string;label:string;emojiValue:string;imageValue?:string;onEmojiChange:(value:string)=>void;onImageChange:(value:string)=>void}){
   const [avatarSize,setAvatarSize]=useState(320);
+  const [sourceImage,setSourceImage]=useState<File|null>(null);
+  const processImage = useCallback(async(file:File,size:number)=>{
+    const resized = await readImageFile(file,{maxDimension:size,maxBytes:110_000});
+    onImageChange(resized);
+  },[onImageChange]);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file = e.target.files?.[0];
     if(!file) return;
-    const resized = await readImageFile(file,{maxDimension:avatarSize,maxBytes:110_000});
-    onImageChange(resized);
+    setSourceImage(file);
+    await processImage(file,avatarSize);
     e.target.value = "";
   };
+  useEffect(()=>{
+    if(!sourceImage) return;
+    void processImage(sourceImage,avatarSize);
+  },[avatarSize,processImage,sourceImage]);
   return <div className="space-y-3">
     <span className={th==="dark"?"text-slate-300":"text-slate-600"}>{label}</span>
     <div className="flex flex-wrap gap-2">
@@ -1682,19 +1701,19 @@ function AvatarPicker({th,label,emojiValue,imageValue,onEmojiChange,onImageChang
     </div>
     <div className="flex flex-wrap items-center gap-3">
       <label className={cx("file-label",th==="dark"?"bg-white/5 text-slate-300 hover:bg-white/10":"bg-slate-100 text-slate-700 hover:bg-slate-200")}>
-        🖼 Upload icon
+        🖼 {t("uploadIcon")}
         <input type="file" accept="image/*" onChange={handleUpload}/>
       </label>
-      {imageValue?.trim()&&<button type="button" onClick={()=>onImageChange("")} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-rose-500/15 text-rose-300":"bg-rose-50 text-rose-600")}>Remove image</button>}
+      {imageValue?.trim()&&<button type="button" onClick={()=>onImageChange("")} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-rose-500/15 text-rose-300":"bg-rose-50 text-rose-600")}>{t("removeImage")}</button>}
     </div>
     <label className="flex items-center gap-3 text-sm">
-      <span className={th==="dark"?"text-slate-400":"text-slate-600"}>Resize</span>
+      <span className={th==="dark"?"text-slate-400":"text-slate-600"}>{t("resize")}</span>
       <input type="range" min={96} max={512} step={16} value={avatarSize} onChange={e=>setAvatarSize(Number(e.target.value)||320)} className="flex-1"/>
       <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{avatarSize}px</span>
     </label>
     {(emojiValue || imageValue) && <div className="flex items-center gap-3">
       <Avatar name="Preview User" icon={emojiValue} iconImage={imageValue} th={th}/>
-      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Preview</p>
+      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("preview")}</p>
     </div>}
   </div>;
 }
@@ -1849,6 +1868,7 @@ function AuthModal({open,mode,th,t,onClose,onSignIn,onSignUp,onToggle}:{
           <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
           <AvatarPicker
             th={th}
+            t={t}
             label={t("profileIcon")}
             emojiValue={form.icon}
             imageValue={form.iconImage}
@@ -1961,6 +1981,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
         <Input th={th} label={t("passportExpiry")} type="date" value={form.passportExpiryDate||""} onChange={e=>setForm(f=>({...f,passportExpiryDate:e.target.value}))}/>
         <AvatarPicker
           th={th}
+          t={t}
           label={t("profileIcon")}
           emojiValue={form.icon||""}
           imageValue={form.iconImage||""}
@@ -1990,7 +2011,7 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
             <div className="flex-1">
               <p className="font-bold text-lg">{tr.title}</p>
               <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)}</p>
-              <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate)}</p>
+              <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate, t)}</p>
             </div>
           </div>
         </Card>)}
@@ -2094,7 +2115,7 @@ function TripCard({trip,th,t,onClick}:{trip:Trip;th:ThemeMode;t:(k:TKey)=>string
       </p>
       <p className={cx("text-sm font-semibold",status==="upcoming"?(th==="dark"?"text-amber-300":"text-amber-700"):status==="past"?(th==="dark"?"text-slate-400":"text-slate-600"):"text-cyan-400")}>{t("status")}: {t(status)}</p>
       <p className={cx("text-sm font-medium",th==="dark"?"text-cyan-300":"text-blue-700")}>
-        ⏳ {tripCountdownLabel(trip.startDate, trip.endDate)}
+        ⏳ {tripCountdownLabel(trip.startDate, trip.endDate, t)}
       </p>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
         👥 {trip.members.length} {t("members")} · {trip.duration} {t("days")}
@@ -2154,7 +2175,7 @@ function TripDetail({trip,user,profiles,siteCfg,th,t,onBack,onUpdate,onDeleteTri
           <span>⏱️ {trip.duration} {t("days")}</span>
           <span>👥 {trip.members.length} {t("members")}</span>
           <span>🧭 {t(status)}</span>
-          <span>⏳ {tripCountdownLabel(trip.startDate, trip.endDate)}</span>
+          <span>⏳ {tripCountdownLabel(trip.startDate, trip.endDate, t)}</span>
         </div>
       </div>
     </div>
@@ -2341,8 +2362,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                 <p className="mt-2 text-lg font-semibold leading-snug">{fmtDate(trip.startDate)}<br />{fmtDate(trip.endDate)}</p>
               </div>
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-                <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>Countdown</p>
-                <p className="mt-2 text-lg font-semibold">{tripCountdownLabel(trip.startDate, trip.endDate)}</p>
+                <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("countdown")}</p>
+                <p className="mt-2 text-lg font-semibold">{tripCountdownLabel(trip.startDate, trip.endDate, t)}</p>
               </div>
               <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
@@ -2575,7 +2596,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
           <Input th={th} label={t("locationName")} value={customForm.query} onChange={e=>setCustomForm(f=>({...f,query:e.target.value}))} placeholder="City, country" className="flex-1"/>
           <Btn th={th} v="sec" onClick={()=>void runLocationSearch()} disabled={searchingLocation}>{searchingLocation?t("loading"):t("searchLocation")}</Btn>
         </div>
-        {searchResults.length>0&&<Select th={th} label="Matching Locations" value={customForm.selected ? `${customForm.selected.name}-${customForm.selected.lat}-${customForm.selected.lon}` : ""} onChange={e=>{
+        {searchResults.length>0&&<Select th={th} label={t("matchingLocations")} value={customForm.selected ? `${customForm.selected.name}-${customForm.selected.lat}-${customForm.selected.lon}` : ""} onChange={e=>{
           const selected = searchResults.find(item=>`${item.name}-${item.lat}-${item.lon}`===e.target.value) ?? null;
           setCustomForm(f=>({...f,selected}));
         }}>
@@ -2583,8 +2604,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
           {searchResults.map(item=><option key={`${item.name}-${item.lat}-${item.lon}`} value={`${item.name}-${item.lat}-${item.lon}`}>{item.name}{item.subtitle ? ` — ${item.subtitle}` : ""}</option>)}
         </Select>}
         <div className="grid grid-cols-2 gap-3">
-          <Input th={th} label="Start Day" type="number" min={1} max={trip.duration} value={customForm.startDay} onChange={e=>setCustomForm(f=>({...f,startDay:+e.target.value}))}/>
-          <Input th={th} label="End Day" type="number" min={1} max={trip.duration} value={customForm.endDay} onChange={e=>setCustomForm(f=>({...f,endDay:+e.target.value}))}/>
+          <Input th={th} label={t("startDay")} type="number" min={1} max={trip.duration} value={customForm.startDay} onChange={e=>setCustomForm(f=>({...f,startDay:+e.target.value}))}/>
+          <Input th={th} label={t("endDay")} type="number" min={1} max={trip.duration} value={customForm.endDay} onChange={e=>setCustomForm(f=>({...f,endDay:+e.target.value}))}/>
         </div>
         {customForm.selected&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>Selected: {customForm.selected.name} ({customForm.selected.lat.toFixed(3)}, {customForm.selected.lon.toFixed(3)}) {customForm.selected.subtitle ? `· ${customForm.selected.subtitle}` : ""}</p>}
         <div className="flex justify-end gap-2">
@@ -2767,10 +2788,10 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <Btn th={th} sz="sm" onClick={()=>sendReminderEmail()} disabled={!canManageReminder||sendingReminder}>
-            {sendingReminder ? "Preparing..." : "Send reminder draft"}
+            {sendingReminder ? t("preparing") : t("sendReminderDraft")}
           </Btn>
           <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-            Owners and editors can prepare a reminder email draft for all travellers. The draft opens in Gmail in a new tab.
+            {t("reminderEmailSupportText")}
           </p>
         </div>
       </div>}
@@ -2972,12 +2993,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
-          <p className="text-sm font-semibold">🔁 Swap this day itinerary</p>
+          <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
           <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-            You are viewing Day {day}. Choose another day to switch all activities.
+            {t("swapItineraryHelp").replace("{day}",String(day))}
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-            <Select th={th} label="Swap with" value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full sm:max-w-[220px]">
+            <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full sm:max-w-[220px]">
               {Array.from({length:trip.duration},(_,i)=>i+1)
                 .filter(d=>d!==day)
                 .map(d=><option key={`swap-${d}`} value={d}>{t("day")} {d}</option>)}
@@ -2987,13 +3008,13 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
               disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
               className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition sm:mb-[1px]",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
             >
-              Swap Day {day} ↔ Day {swapTargetDay}
+              {t("swapDayButton").replace("{dayA}",String(day)).replace("{dayB}",String(swapTargetDay))}
             </button>
           </div>
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="font-semibold">Split timeline by traveler</p>
+            <p className="font-semibold">{t("splitTimelineByTraveler")}</p>
             <Select th={th} value={travelerView} onChange={e=>setTravelerView(e.target.value)} className="w-full sm:w-auto sm:max-w-[220px] !rounded-xl !px-3 !py-2 text-sm">
               {trip.members.map(memberId=>{
                 const traveler=profileMap.get(memberId);
@@ -3002,7 +3023,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             </Select>
           </div>
           <div className="space-y-2 text-sm">
-            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>No activities for this traveler on Day {day}.</p>
+            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("noTravelerActivities").replace("{day}",String(day))}</p>
               :splitTimeline.map(entry=><p key={`it-${entry.item.id}`} className="break-words">🗓️ {entry.item.startTime} {entry.item.title}</p>)}
           </div>
         </div>
@@ -3274,7 +3295,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
                     <div>
                       <p className="font-bold text-lg break-words">{exp.title}</p>
                       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
-                        {fmtDate(exp.date)} · {exp.category}
+                        {fmtDate(exp.date)} · {expenseCategoryLabel(exp.category,t)}
                       </p>
                     </div>
                     <p className="text-2xl font-bold text-cyan-400">{fmtCur(exp.amount,exp.currency)}</p>
@@ -3322,14 +3343,14 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           </Select>
         </div>
         <Select th={th} label={t("category")} value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>
-          {EXPENSE_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+          {EXPENSE_CATS.map(c=><option key={c} value={c}>{expenseCategoryLabel(c,t)}</option>)}
         </Select>
         <Select th={th} label={t("paidBy")} value={form.paidBy} onChange={e=>setForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
-        <Select th={th} label="Split mode" value={form.splitType} onChange={e=>setForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
-          <option value="equal">Equal (auto divide)</option>
-          <option value="custom">Custom amounts</option>
+        <Select th={th} label={t("splitMode")} value={form.splitType} onChange={e=>setForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+          <option value="equal">{t("splitModeEqual")}</option>
+          <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
@@ -3368,14 +3389,14 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           </Select>
         </div>
         <Select th={th} label={t("category")} value={editForm.category} onChange={e=>setEditForm(f=>({...f,category:e.target.value}))}>
-          {EXPENSE_CATS.map(c=><option key={c} value={c}>{c}</option>)}
+          {EXPENSE_CATS.map(c=><option key={c} value={c}>{expenseCategoryLabel(c,t)}</option>)}
         </Select>
         <Select th={th} label={t("paidBy")} value={editForm.paidBy} onChange={e=>setEditForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
-        <Select th={th} label="Split mode" value={editForm.splitType} onChange={e=>setEditForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
-          <option value="equal">Equal (auto divide)</option>
-          <option value="custom">Custom amounts</option>
+        <Select th={th} label={t("splitMode")} value={editForm.splitType} onChange={e=>setEditForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+          <option value="equal">{t("splitModeEqual")}</option>
+          <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
@@ -3516,8 +3537,8 @@ function TripLuggage({trip,user,isOwner,siteCfg,th,t,onAdd,onToggle,onRemove,onA
           <Btn th={th} type="submit">+ {t("add")}</Btn>
         </form>
         {isOwner&&<form onSubmit={addShared} className="flex flex-col sm:flex-row gap-2 mb-6">
-          <Input th={th} value={newSharedItem} onChange={e=>setNewSharedItem(e.target.value)} placeholder="Owner default item (applies to all travelers)" className="flex-1"/>
-          <Btn th={th} v="sec" type="submit">+ Add shared default</Btn>
+          <Input th={th} value={newSharedItem} onChange={e=>setNewSharedItem(e.target.value)} placeholder={t("ownerDefaultItemPlaceholder")} className="flex-1"/>
+          <Btn th={th} v="sec" type="submit">+ {t("addSharedDefault")}</Btn>
         </form>}
 
         {filteredItems.length===0?<Empty icon="🧳" title={t("noLuggage")} desc={t("noLuggageDesc")} th={th}/>
@@ -3931,25 +3952,23 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     </Card>
     <Card th={th} className="p-5 sm:p-6 space-y-4 min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-xl font-semibold">Email Reminder</h3>
+        <h3 className="text-xl font-semibold">{t("reminderEmailCard")}</h3>
         <Btn th={th} v="sec" sz="sm" type="button" onClick={()=>void sendReminderEmail()} disabled={sendingReminder}>
-          {sendingReminder ? "Preparing..." : "Send reminder draft"}
+          {sendingReminder ? t("preparing") : t("sendReminderDraft")}
         </Btn>
       </div>
-      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>
-        Owners and editors can prepare a reminder email draft for all travellers. The draft opens in your default mail app.
-      </p>
-      <Input th={th} label="Subject template" value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})}/>
-      <Textarea th={th} label="Email body template" value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28"/>
+      <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("reminderEmailSupportText")}</p>
+      <Input th={th} label={t("subjectTemplate")} value={reminderTemplate.subject} onChange={e=>updateReminderTemplate({subject:e.target.value})}/>
+      <Textarea th={th} label={t("emailBodyTemplate")} value={reminderTemplate.body} onChange={e=>updateReminderTemplate({body:e.target.value})} className="min-h-28"/>
       <div className="grid sm:grid-cols-2 gap-2 text-sm">
         {[
-          ["Trip title","includeTripTitle"],
-          ["Trip dates","includeDates"],
-          ["Location","includeLocation"],
-          ["Trip ID","includeTripId"],
-          ["Flight summary","includeFlightSummary"],
-          ["Hotel summary","includeHotelSummary"],
-          ["Top travel notes","includeNotesSummary"],
+          [t("reminderTripTitle"),"includeTripTitle"],
+          [t("reminderTripDates"),"includeDates"],
+          [t("reminderLocation"),"includeLocation"],
+          [t("reminderTripId"),"includeTripId"],
+          [t("reminderFlightSummary"),"includeFlightSummary"],
+          [t("reminderHotelSummary"),"includeHotelSummary"],
+          [t("reminderNotesLinks"),"includeNotesSummary"],
         ].map(([label,key])=><label key={key} className={cx("rounded-xl border px-3 py-2 flex items-center gap-2",th==="dark"?"border-white/10 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
           <input type="checkbox" checked={Boolean(reminderTemplate[key as keyof ReminderTemplate])} onChange={e=>updateReminderTemplate({[key]:e.target.checked} as Partial<ReminderTemplate>)}/>
           {label}
@@ -4049,12 +4068,12 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
       <div className="grid lg:grid-cols-2 gap-4 sm:gap-6">
         {(!isMobileScreen||mobileDetailSection==="weather")&&<Card th={th} className="p-5 sm:p-6 space-y-4">
           <h3 className="text-xl font-semibold">{t("weatherLocationSettings")}</h3>
-          <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Add one or more city ranges (for example: Day 1-2 Tokyo, Day 3-4 Seoul, Day 5 Tokyo).</p>
+          <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("weatherRangeHint")}</p>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
             <Input th={th} label={t("locationName")} value={weatherQuery} onChange={e=>setWeatherQuery(e.target.value)} placeholder="City, country" className="w-full"/>
             <Btn th={th} v="sec" type="button" className="h-[42px] whitespace-nowrap sm:px-5" onClick={()=>void searchWeatherLocations()} disabled={weatherSearching}>{weatherSearching?t("loading"):t("searchLocation")}</Btn>
           </div>
-          {weatherSearchResults.length>0&&<Select th={th} label="Matching Locations" value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
+          {weatherSearchResults.length>0&&<Select th={th} label={t("matchingLocations")} value={selectedWeatherResult} onChange={e=>setSelectedWeatherResult(e.target.value)}>
             <option value="">Select location</option>
             {weatherSearchResults.map(item=>{
               const key=`${item.name}-${item.lat}-${item.lon}`;
@@ -4062,11 +4081,11 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
             })}
           </Select>}
           <div className="grid grid-cols-2 gap-3">
-            <Input th={th} label="Start Day" type="number" min={1} max={form.duration} value={weatherStartDay} onChange={e=>setWeatherStartDay(+e.target.value)}/>
-            <Input th={th} label="End Day" type="number" min={1} max={form.duration} value={weatherEndDay} onChange={e=>setWeatherEndDay(+e.target.value)}/>
+            <Input th={th} label={t("startDay")} type="number" min={1} max={form.duration} value={weatherStartDay} onChange={e=>setWeatherStartDay(+e.target.value)}/>
+            <Input th={th} label={t("endDay")} type="number" min={1} max={form.duration} value={weatherEndDay} onChange={e=>setWeatherEndDay(+e.target.value)}/>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
-            <Btn th={th} v="sec" type="button" onClick={addWeatherLocationPlan} disabled={!selectedWeatherResult}>+ Add Range</Btn>
+            <Btn th={th} v="sec" type="button" onClick={addWeatherLocationPlan} disabled={!selectedWeatherResult}>+ {t("addRange")}</Btn>
             <Btn th={th} v="sec" type="button" onClick={()=>setForm(f=>({...f,customLocation:undefined}))}>{t("useDestination")}</Btn>
             <Btn th={th} v="ghost" type="button" onClick={()=>setForm(f=>({...f,weatherLocations:undefined,customLocation:undefined}))}>{t("remove")}</Btn>
           </div>
@@ -4114,7 +4133,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     </div>
     {isOwner&&<div className={cx("rounded-2xl border p-4",th==="dark"?"border-rose-400/30 bg-rose-400/10":"border-rose-200 bg-rose-50")}>
       <p className={cx("mb-3 text-sm",th==="dark"?"text-rose-100":"text-rose-700")}>{t("ownerDeleteTripNote")}</p>
-      <Btn th={th} v="danger" type="button" onClick={removeTrip}>🗑️ delete trip</Btn>
+      <Btn th={th} v="danger" type="button" onClick={removeTrip}>🗑️ {t("deleteTrip")}</Btn>
     </div>}
   </Card>;
 }
