@@ -1583,23 +1583,19 @@ function addFlightLegsToItinerary(base:ItineraryItem[], flightLegs:FlightLeg[], 
   return sortItineraryByDayAndTime(combined);
 }
 
-async function searchHotelByQuery(siteCfg:SiteSettings,hotelName:string,location:string){
+async function searchHotelByQuery(_siteCfg:SiteSettings,hotelName:string,location:string){
   const q=[hotelName,location].filter(Boolean).join(" ").trim();
   if(!q)return null;
-  try{
-    const url=buildUrl(siteCfg.weatherApi.hotelLookupUrl,{query:q});
-    const resp=await fetch(url,{headers:{"Accept":"application/json"}});
-    if(!resp.ok)return null;
-    const data=await resp.json();
-    const first=(Array.isArray(data)?data[0]:null) as {name?:string;display_name?:string}|null;
-    if(!first)return null;
-    return {
-      hotelName: hotelName.trim() || first.name || q,
-      hotelAddress: first.display_name || location,
-      contact: "",
-      roomType: "",
-    };
-  }catch{return null;}
+  const mapSearchUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  if(typeof window!=="undefined"){
+    window.open(mapSearchUrl,"_blank","noopener,noreferrer");
+  }
+  return {
+    hotelName: hotelName.trim() || q,
+    hotelAddress: location.trim() || q,
+    contact: "",
+    roomType: "",
+  };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════
