@@ -300,11 +300,12 @@ const withOptionalWeatherLanguage = (url:string, query:string)=>{
   if(!isCjkQuery(query)) return url;
   try{
     const next = new URL(url);
-    if(!next.searchParams.get("language")){
-      next.searchParams.set("language","zh");
-    }
+    next.searchParams.set("language","zh");
     return next.toString();
   }catch{
+    if(/([?&])language=/.test(url)){
+      return url.replace(/([?&]language=)[^&]*/,"$1zh");
+    }
     const separator = url.includes("?") ? "&" : "?";
     return `${url}${separator}language=zh`;
   }
