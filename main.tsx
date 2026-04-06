@@ -295,11 +295,38 @@ const resolveReminderRecipients = (memberIds:string[], profiles:Profile[])=>memb
   .map(id=>profiles.find(profile=>profile.id===id))
   .filter((member):member is Profile=>Boolean(member?.email?.trim()))
   .map(member=>member.email.trim());
+const isCjkQuery = (query:string)=>/[\u3400-\u9FFF]/.test(query);
+const withOptionalWeatherLanguage = (url:string, query:string)=>{
+  if(!isCjkQuery(query)) return url;
+  try{
+    const next = new URL(url);
+    next.searchParams.set("language","zh");
+    return next.toString();
+  }catch{
+    if(/([?&])language=/.test(url)){
+      return url.replace(/([?&]language=)[^&]*/,"$1zh");
+    }
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}language=zh`;
+  }
+};
+const isWebAttachmentUrl = (url:string)=>/^https?:\/\//i.test(url.trim());
+const buildReminderNotesSummary = (notes:TravelNote[], t:(k:TKey)=>string)=>{
+  const noteTexts = notes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
+  const attachmentLinks = notes
+    .flatMap(note=>note.attachments ?? [])
+    .filter(attachment=>isWebAttachmentUrl(attachment.url))
+    .slice(0,6)
+    .map(attachment=>`${attachment.name || t("attachments")}: ${attachment.url.trim()}`);
+  return { noteTexts, attachmentLinks };
+};
 const openReminderDraftInGmail = ({memberIds,profiles,subjectTemplate,tripTitle,body}:{memberIds:string[];profiles:Profile[];subjectTemplate:string;tripTitle:string;body:string;})=>{
   const recipients = resolveReminderRecipients(memberIds,profiles);
   if(recipients.length===0) return false;
   const subject = (subjectTemplate || "Trip reminder: {tripTitle}").replaceAll("{tripTitle}",tripTitle);
-  const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, body);
+  const maxBodyLength = 6000;
+  const normalizedBody = body.length > maxBodyLength ? `${body.slice(0,maxBodyLength)}\n\n...` : body;
+  const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, normalizedBody);
   window.open(gmailUrl,"_blank","noopener,noreferrer");
   return true;
 };
@@ -1310,7 +1337,7 @@ function formatForecastDate(date: string) {
 async function lookupLocation(siteCfg: SiteSettings, query: string): Promise<GeoPoint | null> {
   if (!query.trim()) return null;
   try {
-    const gurl = buildUrl(siteCfg.weatherApi.geocodeUrl, { query });
+    const gurl = withOptionalWeatherLanguage(buildUrl(siteCfg.weatherApi.geocodeUrl, { query }), query);
     const r = await fetch(gurl);
     const d = await r.json();
     const loc = d.results?.[0];
@@ -1324,7 +1351,7 @@ async function lookupLocation(siteCfg: SiteSettings, query: string): Promise<Geo
 async function searchLocations(siteCfg: SiteSettings, query: string): Promise<GeoSearchResult[]> {
   if (!query.trim()) return [];
   try {
-    const baseUrl = buildUrl(siteCfg.weatherApi.geocodeUrl, { query });
+    const baseUrl = withOptionalWeatherLanguage(buildUrl(siteCfg.weatherApi.geocodeUrl, { query }), query);
     const url = baseUrl.includes("count=") ? baseUrl.replace(/count=\d+/,"count=8") : `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}count=8`;
     const r = await fetch(url);
     const d = await r.json();
@@ -2660,8 +2687,9 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
       lines.push(`${t("reminderHotelSummary")}: ${tripHotelSummary(trip).join(" · ") || t("none")}`);
     }
     if(reminderTemplate.includeNotesSummary){
-      const noteTexts = trip.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
+      const { noteTexts, attachmentLinks } = buildReminderNotesSummary(trip.travelNotes, t);
       if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
+      if(attachmentLinks.length) lines.push(`${t("attachments")}: ${attachmentLinks.join(" | ")}`);
     }
     return lines.filter(Boolean).join("\n\n");
   };
@@ -2896,6 +2924,12 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       if(item.day===targetDay) return {...item,day};
       return item;
     });
+    const swappedOptionalStops = trip.optionalStops.map(stop=>{
+      if(stop.day===day) return {...stop,day:targetDay};
+      if(stop.day===targetDay) return {...stop,day};
+      return stop;
+    });
+    onTripUpdate(trip.id,{optionalStops:swappedOptionalStops});
     persistItems(sortItineraryByDayAndTime(next));
   };
 
@@ -3870,8 +3904,9 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
       lines.push(`${t("reminderHotelSummary")}: ${tripHotelSummary(form).join(" · ") || t("none")}`);
     }
     if(reminderTemplate.includeNotesSummary){
-      const noteTexts = form.travelNotes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
+      const { noteTexts, attachmentLinks } = buildReminderNotesSummary(form.travelNotes, t);
       if(noteTexts.length) lines.push(`${t("travelNotes")}: ${noteTexts.join(" | ")}`);
+      if(attachmentLinks.length) lines.push(`${t("attachments")}: ${attachmentLinks.join(" | ")}`);
     }
     return lines.filter(Boolean).join("\n\n");
   };
