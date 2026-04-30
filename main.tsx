@@ -3342,12 +3342,40 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
   const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
   const [formError,setFormError]=useState("");
   const [editFormError,setEditFormError]=useState("");
+  const [expandedCurrencies,setExpandedCurrencies]=useState<Record<string, boolean>>({});
+  const [expandedExpenses,setExpandedExpenses]=useState<Record<string, boolean>>({});
+  const [dayFilter,setDayFilter]=useState("all");
+  const [categoryFilter,setCategoryFilter]=useState("all");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const expenseCurrencies=[...new Set(trip.expenses.map(exp=>exp.currency || "USD"))];
   const settlementByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlements(trip,profiles,currency)]));
   const myBalByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlementByCurrency[currency].bal.find(b=>b.id===user.id)]));
   const totalsByCurrency = trip.expenses.reduce<Record<string, number>>((acc,expense)=>{
+    const cur = expense.currency || "USD";
+    acc[cur] = (acc[cur] ?? 0) + expense.amount;
+    return acc;
+  },{});
+  const categoryFilters=[...new Set(trip.expenses.map(exp=>exp.category).filter(Boolean))];
+  const getTripDay=(dateStr:string)=>{
+    if(!dateStr || !trip.startDate) return null;
+    const start = new Date(trip.startDate);
+    const expenseDate = new Date(dateStr);
+    if(Number.isNaN(start.getTime()) || Number.isNaN(expenseDate.getTime())) return null;
+    start.setHours(0,0,0,0);
+    expenseDate.setHours(0,0,0,0);
+    const diff=Math.floor((expenseDate.getTime()-start.getTime())/86400000)+1;
+    return diff>0 ? diff : null;
+  };
+  const filteredExpenses = trip.expenses.filter(exp=>{
+    const dayMatch = dayFilter==="all" ? true : getTripDay(exp.date)===Number(dayFilter);
+    const catMatch = categoryFilter==="all" ? true : exp.category===categoryFilter;
+    return dayMatch && catMatch;
+  });
+  const visibleExpenseCurrencies=[...new Set(filteredExpenses.map(exp=>exp.currency || "USD"))];
+  const toggleCurrency=(currency:string)=>setExpandedCurrencies(curr=>({...curr,[currency]:!(curr[currency] ?? true)}));
+  const toggleExpense=(expenseId:string)=>setExpandedExpenses(curr=>({...curr,[expenseId]:!(curr[expenseId] ?? true)}));
+  const filteredTotalsByCurrency = filteredExpenses.reduce<Record<string, number>>((acc,expense)=>{
     const cur = expense.currency || "USD";
     acc[cur] = (acc[cur] ?? 0) + expense.amount;
     return acc;
@@ -3412,6 +3440,18 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         </div>
         {!canEdit&&<p className={cx("mb-4 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("joinersCanEditExpenses")}</p>}
 
+        {expenseCurrencies.some(currency=>settlementByCurrency[currency].sett.length>0)&&<Card th={th} className="p-5 sm:p-8 mb-6">
+          <h3 className="text-xl font-bold mb-4">{t("settlements")}</h3>
+          <div className="space-y-4">
+            {expenseCurrencies.map(currency=>settlementByCurrency[currency].sett.length>0&&<div key={currency} className="space-y-2">
+              <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+              {settlementByCurrency[currency].sett.map((s,i)=><p key={`${currency}-${i}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
+                <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,currency)}</span>
+              </p>)}
+            </div>)}
+          </div>
+        </Card>}
+
         {/* Balance Summary */}
         {expenseCurrencies.length>0&&<Card th={th} className="p-4 sm:p-6 mb-6 bg-gradient-to-br from-blue-500/10 to-purple-500/10">
           <h3 className="text-xl font-bold mb-4">{t("balanceSummary")}</h3>
@@ -3434,11 +3474,28 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           </p>
         </Card>}
 
-        {trip.expenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <Select th={th} label={`${t("day")} Filter`} value={dayFilter} onChange={e=>setDayFilter(e.target.value)}>
+            <option value="all">All {t("day")}</option>
+            {Array.from({length:trip.duration},(_,i)=>i+1).map(day=><option key={`exp-day-${day}`} value={day}>{t("day")} {day}</option>)}
+          </Select>
+          <Select th={th} label={`${t("category")} Filter`} value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
+            <option value="all">All {t("category")}</option>
+            {categoryFilters.map(category=><option key={`exp-cat-${category}`} value={category}>{expenseCategoryLabel(category,t)}</option>)}
+          </Select>
+        </div>
+        {filteredExpenses.length>0&&<p className={cx("mb-4 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
+          Filtered totals: {Object.entries(filteredTotalsByCurrency).map(([currency,total])=>fmtCur(total,currency)).join(" · ")}
+        </p>}
+
+        {filteredExpenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
         :<div className="space-y-5">
-          {expenseCurrencies.map(currency=><div key={currency} className="space-y-3">
-            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
-            {trip.expenses.filter(exp=>exp.currency===currency).map(exp=>{
+          {visibleExpenseCurrencies.map(currency=><div key={currency} className="space-y-3">
+            <button type="button" onClick={()=>toggleCurrency(currency)} className={cx("w-full flex items-center justify-between text-sm font-semibold rounded-xl border px-3 py-2",th==="dark"?"border-white/10 text-cyan-300 hover:bg-white/5":"border-slate-200 text-blue-700 hover:bg-slate-50")}>
+              <span>{currency}</span>
+              <span>{expandedCurrencies[currency] ?? true ? "▾" : "▸"}</span>
+            </button>
+            {(expandedCurrencies[currency] ?? true) && filteredExpenses.filter(exp=>exp.currency===currency).map(exp=>{
             const payer=members.find(m=>m.id===exp.paidBy);
             return <Card key={exp.id} th={th} className="p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
@@ -3452,13 +3509,18 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
                     </div>
                     <p className="text-2xl font-bold text-cyan-400">{fmtCur(exp.amount,exp.currency)}</p>
                   </div>
-                  <p className={cx("text-sm break-words",th==="dark"?"text-slate-400":"text-slate-500")}>
-                    {t("paidBy")}: {payer?dn(payer):t("unknown")} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
-                    {exp.participants.length>0&&<span className="ml-2">
-                      ({exp.participants.map(pid=>members.find(m=>m.id===pid)).filter(Boolean).map(m=>dn(m!)).join(", ")})
-                    </span>}
-                  </p>
-                  {exp.notes&&<p className={cx("text-sm mt-1",th==="dark"?"text-slate-300":"text-slate-600")}>{exp.notes}</p>}
+                  <button type="button" onClick={()=>toggleExpense(exp.id)} className={cx("text-xs font-semibold mb-2",th==="dark"?"text-cyan-300":"text-blue-700")}>
+                    {expandedExpenses[exp.id] ?? true ? "Hide details" : "Show details"}
+                  </button>
+                  {(expandedExpenses[exp.id] ?? true) && <>
+                    <p className={cx("text-sm break-words",th==="dark"?"text-slate-400":"text-slate-500")}>
+                      {t("paidBy")}: {payer?dn(payer):t("unknown")} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
+                      {exp.participants.length>0&&<span className="ml-2">
+                        ({exp.participants.map(pid=>members.find(m=>m.id===pid)).filter(Boolean).map(m=>dn(m!)).join(", ")})
+                      </span>}
+                    </p>
+                    {exp.notes&&<p className={cx("text-sm mt-1",th==="dark"?"text-slate-300":"text-slate-600")}>{exp.notes}</p>}
+                  </>}
                 </div>
                 <div className="flex items-center gap-2 self-end sm:self-auto">
                   <Btn th={th} v="sec" sz="sm" onClick={()=>startEdit(exp)} disabled={!canEdit}>{t("edit")}</Btn>
@@ -3470,18 +3532,6 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           </div>)}
         </div>}
       </Card>
-
-      {expenseCurrencies.some(currency=>settlementByCurrency[currency].sett.length>0)&&<Card th={th} className="p-5 sm:p-8">
-        <h3 className="text-xl font-bold mb-4">{t("settlements")}</h3>
-        <div className="space-y-4">
-          {expenseCurrencies.map(currency=>settlementByCurrency[currency].sett.length>0&&<div key={currency} className="space-y-2">
-            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
-            {settlementByCurrency[currency].sett.map((s,i)=><p key={`${currency}-${i}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
-              <span className="font-semibold">{s.from}</span> {t("owes")} <span className="font-semibold">{s.to}</span>: <span className="text-cyan-400 font-bold">{fmtCur(s.amount,currency)}</span>
-            </p>)}
-          </div>)}
-        </div>
-      </Card>}
     </div>
 
     <Modal open={showForm} onClose={()=>setShowForm(false)} th={th} title={t("addExpense")}>
