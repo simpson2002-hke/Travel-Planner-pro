@@ -3342,6 +3342,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
   const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
   const [formError,setFormError]=useState("");
   const [editFormError,setEditFormError]=useState("");
+  const [expandedCurrencies,setExpandedCurrencies]=useState<Record<string, boolean>>({});
+  const [dayFilter,setDayFilter]=useState("all");
+  const [categoryFilter,setCategoryFilter]=useState("all");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const expenseCurrencies=[...new Set(trip.expenses.map(exp=>exp.currency || "USD"))];
@@ -3352,6 +3355,24 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     acc[cur] = (acc[cur] ?? 0) + expense.amount;
     return acc;
   },{});
+  const categoryFilters=[...new Set(trip.expenses.map(exp=>exp.category).filter(Boolean))];
+  const getTripDay=(dateStr:string)=>{
+    if(!dateStr || !trip.startDate) return null;
+    const start = new Date(trip.startDate);
+    const expenseDate = new Date(dateStr);
+    if(Number.isNaN(start.getTime()) || Number.isNaN(expenseDate.getTime())) return null;
+    start.setHours(0,0,0,0);
+    expenseDate.setHours(0,0,0,0);
+    const diff=Math.floor((expenseDate.getTime()-start.getTime())/86400000)+1;
+    return diff>0 ? diff : null;
+  };
+  const filteredExpenses = trip.expenses.filter(exp=>{
+    const dayMatch = dayFilter==="all" ? true : getTripDay(exp.date)===Number(dayFilter);
+    const catMatch = categoryFilter==="all" ? true : exp.category===categoryFilter;
+    return dayMatch && catMatch;
+  });
+  const visibleExpenseCurrencies=[...new Set(filteredExpenses.map(exp=>exp.currency || "USD"))];
+  const toggleCurrency=(currency:string)=>setExpandedCurrencies(curr=>({...curr,[currency]:!(curr[currency] ?? true)}));
 
   const toggleParticipant=(pid:string)=>{
     setForm(f=>({...f,participants:f.participants.includes(pid)?f.participants.filter(x=>x!==pid):[...f.participants,pid]}));
@@ -3434,11 +3455,25 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           </p>
         </Card>}
 
-        {trip.expenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <Select th={th} label={`${t("day")} Filter`} value={dayFilter} onChange={e=>setDayFilter(e.target.value)}>
+            <option value="all">All {t("day")}</option>
+            {Array.from({length:trip.duration},(_,i)=>i+1).map(day=><option key={`exp-day-${day}`} value={day}>{t("day")} {day}</option>)}
+          </Select>
+          <Select th={th} label={`${t("category")} Filter`} value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
+            <option value="all">All {t("category")}</option>
+            {categoryFilters.map(category=><option key={`exp-cat-${category}`} value={category}>{expenseCategoryLabel(category,t)}</option>)}
+          </Select>
+        </div>
+
+        {filteredExpenses.length===0?<Empty icon="💰" title={t("noExpenses")} desc={t("noExpensesDesc")} th={th}/>
         :<div className="space-y-5">
-          {expenseCurrencies.map(currency=><div key={currency} className="space-y-3">
-            <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
-            {trip.expenses.filter(exp=>exp.currency===currency).map(exp=>{
+          {visibleExpenseCurrencies.map(currency=><div key={currency} className="space-y-3">
+            <button type="button" onClick={()=>toggleCurrency(currency)} className={cx("w-full flex items-center justify-between text-sm font-semibold rounded-xl border px-3 py-2",th==="dark"?"border-white/10 text-cyan-300 hover:bg-white/5":"border-slate-200 text-blue-700 hover:bg-slate-50")}>
+              <span>{currency}</span>
+              <span>{expandedCurrencies[currency] ?? true ? "▾" : "▸"}</span>
+            </button>
+            {(expandedCurrencies[currency] ?? true) && filteredExpenses.filter(exp=>exp.currency===currency).map(exp=>{
             const payer=members.find(m=>m.id===exp.paidBy);
             return <Card key={exp.id} th={th} className="p-4 sm:p-5">
               <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
