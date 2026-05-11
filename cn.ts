@@ -44,6 +44,7 @@ const en = {
   tripId: "Trip ID", enterTripId: "Enter trip ID to join…",
   copyId: "Copy ID", copied: "Copied!",
   noTrips: "No trips yet", noTripsDesc: "Create a new trip or join one with a Trip ID.",
+  archive: "Archive",
   duration: "Duration", days: "days", members: "Members", owner: "Owner",
   status: "Status", upcoming: "Upcoming", active: "Active", past: "Past",
 
@@ -174,6 +175,7 @@ const zh: typeof en = {
   tripId: "旅程編號", enterTripId: "輸入旅程編號以加入…",
   copyId: "複製編號", copied: "已複製！",
   noTrips: "尚無旅程", noTripsDesc: "建立新旅程或以編號加入。",
+  archive: "封存",
   duration: "天數", days: "天", members: "成員", owner: "建立者",
   status: "狀態", upcoming: "即將出發", active: "進行中", past: "已完成",
 
