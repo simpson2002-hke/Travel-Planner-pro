@@ -2351,6 +2351,9 @@ function TripSelector({trips,th,t,onCreate,onJoin,onSelect}:{trips:Trip[];th:The
     if(res.ok){setShowJoin(false);setJoinCode("");}else setMsg(res.message);
   };
 
+  const activeTrips=trips.filter(tr=>getTripStatus(tr)!=="past");
+  const archivedTrips=trips.filter(tr=>getTripStatus(tr)==="past");
+
   return <div className="space-y-6">
     <div className="flex gap-3">
       <Btn th={th} onClick={()=>setShowCreate(true)}>+ {t("createTrip")}</Btn>
@@ -2358,8 +2361,16 @@ function TripSelector({trips,th,t,onCreate,onJoin,onSelect}:{trips:Trip[];th:The
     </div>
 
     {trips.length===0?<Empty icon="✈️" title={t("noTrips")} desc={t("noTripsDesc")} th={th}/>
-    :<div className="grid md:grid-cols-2 gap-4">
-      {trips.map(tr=><TripCard key={tr.id} trip={tr} th={th} t={t} onClick={()=>onSelect(tr.id)}/>)}
+    :<div className="space-y-6">
+      {activeTrips.length>0&&<div className="grid md:grid-cols-2 gap-4">
+        {activeTrips.map(tr=><TripCard key={tr.id} trip={tr} th={th} t={t} onClick={()=>onSelect(tr.id)}/>)}
+      </div>}
+      {archivedTrips.length>0&&<section className="space-y-3">
+        <h3 className={cx("text-sm font-semibold uppercase tracking-wide",th==="dark"?"text-slate-400":"text-slate-600")}>{t("archive")}</h3>
+        <div className="grid md:grid-cols-2 gap-4">
+          {archivedTrips.map(tr=><TripCard key={tr.id} trip={tr} th={th} t={t} onClick={()=>onSelect(tr.id)}/>)}
+        </div>
+      </section>}
     </div>}
 
     <Modal open={showCreate} onClose={()=>setShowCreate(false)} th={th} title={t("createTrip")}>
