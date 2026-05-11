@@ -3111,6 +3111,34 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   };
 
   const removeOptionalStop=(id:string)=>onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(stop=>stop.id!==id)});
+  const transferOptionalStopToSchedule=(stop:OptionalStop)=>{
+    if(!canEdit) return;
+    const nextActivity: ItineraryItem = {
+      id: uid("it"),
+      day: stop.day,
+      order: 0,
+      startTime: "09:00",
+      endTime: "10:00",
+      endDayOffset: 0,
+      title: stop.title,
+      stopLocation: stop.location || "",
+      transport: "Activity",
+      details: stop.notes || "",
+      photo: "",
+      mapUrl: stop.mapUrl || googleMapEmbedUrl(stop.location),
+      activityType: "regular",
+      mediaSize: "small",
+      freeTimeOwnerId: "",
+      freeTimeParticipantIds: [],
+      needsFollowUp: false,
+      followUpNote: "",
+      transitToNext: {duration:"",details:""},
+    };
+    persistItems(sortItineraryByDayAndTime([...trip.itinerary, nextActivity]));
+    onTripUpdate(trip.id,{optionalStops:trip.optionalStops.filter(item=>item.id!==stop.id)});
+    setActivePane("schedule");
+    setDay(stop.day);
+  };
   const profileMap = new Map(profiles.map(profile=>[profile.id,profile]));
   const splitTimeline = dayItems
     .filter(item=>item.activityType!=="free-time"
@@ -3202,6 +3230,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                 {stop.url&&<a href={stop.url} target="_blank" rel="noreferrer" className={cx("mt-3 inline-flex text-sm font-semibold underline",th==="dark"?"text-cyan-300":"text-blue-700")}>{stop.url}</a>}
               </div>
               <div className="flex gap-2">
+                <Btn th={th} v="ghost" sz="sm" onClick={()=>transferOptionalStopToSchedule(stop)} disabled={!canEdit}>{t("moveToSchedule")}</Btn>
                 <Btn th={th} v="sec" sz="sm" onClick={()=>editOptionalStop(stop)} disabled={!canEdit}>{t("edit")}</Btn>
                 <Btn th={th} v="danger" sz="sm" onClick={()=>removeOptionalStop(stop.id)} disabled={!canEdit}>{t("remove")}</Btn>
               </div>
