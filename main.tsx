@@ -3139,6 +3139,27 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     setActivePane("schedule");
     setDay(stop.day);
   };
+  const transferScheduleItemToOptional=(item:ItineraryItem)=>{
+    if(!canEdit) return;
+    const nextOptionalStop: OptionalStop = {
+      id: uid("opt"),
+      day: item.day,
+      type: "other",
+      title: item.title,
+      location: item.stopLocation || "",
+      url: "",
+      mapUrl: item.mapUrl || googleMapEmbedUrl(item.stopLocation || ""),
+      notes: item.details || "",
+    };
+    const remaining=trip.itinerary.filter(it=>it.id!==item.id);
+    const remainingDay=remaining.filter(it=>it.day===item.day).sort((a,b)=>a.order-b.order);
+    const orderMap=new Map(remainingDay.map((entry,index)=>[entry.id,index+1]));
+    const reordered=remaining.map(it=>it.day===item.day?{...it,order:orderMap.get(it.id)??it.order}:it);
+    persistItems(reordered);
+    onTripUpdate(trip.id,{optionalStops:[nextOptionalStop,...trip.optionalStops]});
+    setActivePane("saved");
+    setDay(item.day);
+  };
   const profileMap = new Map(profiles.map(profile=>[profile.id,profile]));
   const splitTimeline = dayItems
     .filter(item=>item.activityType!=="free-time"
@@ -3212,7 +3233,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                   </div>}
                 </div>}
               </div>
-              <div className="flex w-full sm:w-auto gap-2 justify-end self-end sm:self-start"><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
+              <div className="flex w-full sm:w-auto gap-2 justify-end self-end sm:self-start"><Btn th={th} v="ghost" sz="sm" onClick={()=>transferScheduleItemToOptional(it)} disabled={!canEdit}>{t("moveToOptional")}</Btn><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>}
