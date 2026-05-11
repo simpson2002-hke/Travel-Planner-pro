@@ -1518,6 +1518,30 @@ async function renderCircularAvatar(source:string,{size=320,zoom=1,offsetX=0,off
   return compressed;
 }
 
+async function renderBannerImage(source:string,{width=1200,height=400,zoom=1,offsetX=0,offsetY=0,maxBytes=350_000}:{width?:number;height?:number;zoom?:number;offsetX?:number;offsetY?:number;maxBytes?:number}={}){
+  const img = await loadImageFromSource(source);
+  const baseScale = Math.max(width / Math.max(1,img.width), height / Math.max(1,img.height));
+  const drawScale = Math.max(1,zoom) * baseScale;
+  const drawW = img.width * drawScale;
+  const drawH = img.height * drawScale;
+  const clampedX = clampCropOffset(offsetX,drawW,width);
+  const clampedY = clampCropOffset(offsetY,drawH,height);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if(!ctx) return source;
+  ctx.drawImage(img,(width-drawW)/2 + clampedX,(height-drawH)/2 + clampedY,drawW,drawH);
+
+  let quality = 0.92;
+  let compressed = canvas.toDataURL("image/jpeg",quality);
+  while(compressed.length > maxBytes && quality > 0.35){
+    quality = +(quality - 0.08).toFixed(2);
+    compressed = canvas.toDataURL("image/jpeg",quality);
+  }
+  return compressed;
+}
+
 
 function meetsPasswordPolicy(password:string){
   return password.length>=8;
@@ -1863,6 +1887,109 @@ function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageCha
       <Avatar name="Preview User" icon={emojiValue} iconImage={imageValue} th={th}/>
       <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("preview")}</p>
     </div>}
+  </div>;
+}
+
+function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode;t:(k:TKey)=>string;imageValue:string;onImageChange:(value:string)=>void;message?:string}){
+  const PREVIEW_W = 320;
+  const PREVIEW_H = 128;
+  const [sourceImage,setSourceImage]=useState<string>("");
+  const [sourceMeta,setSourceMeta]=useState<{width:number;height:number}|null>(null);
+  const [zoom,setZoom]=useState(1);
+  const [offsetX,setOffsetX]=useState(0);
+  const [offsetY,setOffsetY]=useState(0);
+  const dragState = useRef<{startX:number;startY:number;baseX:number;baseY:number;pointerId:number}|null>(null);
+  const getOffsetLimit = useCallback((meta:{width:number;height:number}|null,nextZoom:number)=>{
+    if(!meta) return {x:0,y:0};
+    const baseScale = Math.max(PREVIEW_W / Math.max(1,meta.width), PREVIEW_H / Math.max(1,meta.height));
+    const drawW = meta.width * baseScale * nextZoom;
+    const drawH = meta.height * baseScale * nextZoom;
+    return {x:Math.max(0,(drawW-PREVIEW_W)/2),y:Math.max(0,(drawH-PREVIEW_H)/2)};
+  },[]);
+  const clampOffsets = useCallback((nextX:number,nextY:number,nextZoom=zoom)=>{
+    const limit = getOffsetLimit(sourceMeta,nextZoom);
+    return {x:Math.max(-limit.x,Math.min(limit.x,nextX)),y:Math.max(-limit.y,Math.min(limit.y,nextY))};
+  },[getOffsetLimit,sourceMeta,zoom]);
+  const processImage = useCallback(async(source:string,cropZoom:number,cropX:number,cropY:number)=>{
+    const cropped = await renderBannerImage(source,{width:1200,height:400,zoom:cropZoom,offsetX:cropX,offsetY:cropY,maxBytes:350_000});
+    onImageChange(cropped);
+  },[onImageChange]);
+  const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];
+    if(!file) return;
+    const raw=await readFile(file);
+    setSourceImage(raw);
+    setZoom(1);
+    setOffsetX(0);
+    setOffsetY(0);
+    e.target.value="";
+  };
+  useEffect(()=>{
+    if(!sourceImage){setSourceMeta(null);return;}
+    void loadImageFromSource(sourceImage).then(img=>setSourceMeta({width:img.width,height:img.height})).catch(()=>setSourceMeta(null));
+  },[sourceImage]);
+  useEffect(()=>{
+    if(!sourceImage) return;
+    const clamped = clampOffsets(offsetX,offsetY,zoom);
+    if(clamped.x!==offsetX) setOffsetX(clamped.x);
+    if(clamped.y!==offsetY) setOffsetY(clamped.y);
+    void processImage(sourceImage,zoom,clamped.x,clamped.y);
+  },[clampOffsets,offsetX,offsetY,processImage,sourceImage,zoom]);
+  return <div className="space-y-3">
+    {imageValue&&<div className="mb-3 relative">
+      <img src={imageValue} alt="Banner" className="w-full h-40 object-cover rounded-2xl"/>
+      <button type="button" onClick={()=>onImageChange("")} className="absolute top-2 right-2 px-3 py-1 rounded-full bg-rose-500 text-white text-sm font-medium">{t("removeBanner")}</button>
+    </div>}
+    <label className={cx("flex items-center gap-2 px-4 py-3 rounded-2xl border cursor-pointer transition",
+      th==="dark"?"border-white/10 bg-white/5 hover:bg-white/10":"border-slate-300 bg-white hover:bg-slate-50")}>
+      📤 {t("uploadBanner")}<input type="file" accept="image/*" className="hidden" onChange={handleUpload}/>
+    </label>
+    {sourceImage&&<div className="space-y-3">
+      <label className="flex items-center gap-3 text-sm">
+        <span className={th==="dark"?"text-slate-400":"text-slate-600"}>{t("zoom")}</span>
+        <input type="range" min={1} max={3} step={0.05} value={zoom} onChange={e=>{
+          const nextZoom = Number(e.target.value) || 1;
+          const clamped = clampOffsets(offsetX,offsetY,nextZoom);
+          setZoom(nextZoom);
+          setOffsetX(clamped.x);
+          setOffsetY(clamped.y);
+        }} className="flex-1"/>
+        <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{zoom.toFixed(2)}x</span>
+      </label>
+      <p className={cx("mb-2 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Drag image to adjust banner crop.</p>
+      <div
+        className={cx("relative mx-auto overflow-hidden rounded-2xl border-2 touch-none",th==="dark"?"border-cyan-300/70 bg-black/20":"border-slate-400 bg-slate-100")}
+        style={{width:PREVIEW_W,height:PREVIEW_H}}
+        onPointerDown={e=>{
+          dragState.current={startX:e.clientX,startY:e.clientY,baseX:offsetX,baseY:offsetY,pointerId:e.pointerId};
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={e=>{
+          if(!dragState.current || dragState.current.pointerId!==e.pointerId) return;
+          const dx=e.clientX-dragState.current.startX;
+          const dy=e.clientY-dragState.current.startY;
+          const clamped=clampOffsets(dragState.current.baseX + dx,dragState.current.baseY + dy);
+          setOffsetX(clamped.x);
+          setOffsetY(clamped.y);
+        }}
+        onPointerUp={e=>{
+          if(dragState.current?.pointerId===e.pointerId){
+            e.currentTarget.releasePointerCapture(e.pointerId);
+            dragState.current=null;
+          }
+        }}
+        onPointerCancel={()=>{dragState.current=null;}}
+      >
+        {sourceMeta&&<img src={sourceImage} alt="Banner crop source" draggable={false} className="pointer-events-none select-none absolute max-w-none" style={{
+          width:sourceMeta.width * Math.max(PREVIEW_W / Math.max(1,sourceMeta.width), PREVIEW_H / Math.max(1,sourceMeta.height)) * zoom,
+          height:sourceMeta.height * Math.max(PREVIEW_W / Math.max(1,sourceMeta.width), PREVIEW_H / Math.max(1,sourceMeta.height)) * zoom,
+          left:"50%",
+          top:"50%",
+          transform:`translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))`,
+        }}/>}
+      </div>
+    </div>}
+    {message&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{message}</p>}
   </div>;
 }
 
@@ -3991,19 +4118,6 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     onBack();
   };
 
-  const handleBannerUpload=async(e:ChangeEvent<HTMLInputElement>)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    try{
-      const url=await readImageFile(file);
-      setForm(f=>({...f,bannerImage:url}));
-      setBannerMessage(t("bannerUploadedRememberSave"));
-    }catch(error){
-      setBannerMessage(error instanceof Error ? error.message : t("bannerUploadFailed"));
-    }finally{
-      e.target.value="";
-    }
-  };
-
   const setBannerUrl=()=>{
     if(form.bannerImageUrl.trim()){
       setForm(f=>({...f,bannerImage:f.bannerImageUrl.trim(),bannerImageUrl:""}));
@@ -4292,18 +4406,11 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
 
     {(!isMobileScreen||mobileDetailSection==="banner")&&<div>
       <p className="mb-2 font-medium">{t("bannerImage")}</p>
-      {form.bannerImage&&<div className="mb-3 relative">
-        <img src={form.bannerImage} alt="Banner" className="w-full h-40 object-cover rounded-2xl"/>
-        <button onClick={()=>setForm(f=>({...f,bannerImage:""}))} className="absolute top-2 right-2 px-3 py-1 rounded-full bg-rose-500 text-white text-sm font-medium">
-          {t("removeBanner")}
-        </button>
-      </div>}
       <div className="space-y-3">
-        <label className={cx("flex items-center gap-2 px-4 py-3 rounded-2xl border cursor-pointer transition",
-          th==="dark"?"border-white/10 bg-white/5 hover:bg-white/10":"border-slate-300 bg-white hover:bg-slate-50")}>
-          📤 {t("uploadBanner")}<input type="file" accept="image/*" className="hidden" onChange={handleBannerUpload}/>
-        </label>
-        {bannerMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{bannerMessage}</p>}
+        <BannerImagePicker th={th} t={t} imageValue={form.bannerImage} message={bannerMessage} onImageChange={value=>{
+          setForm(f=>({...f,bannerImage:value}));
+          if(value) setBannerMessage(t("bannerUploadedRememberSave"));
+        }}/>
         <div className="flex flex-col sm:flex-row gap-2">
           <Input th={th} value={form.bannerImageUrl} onChange={e=>setForm(f=>({...f,bannerImageUrl:e.target.value}))} placeholder={t("bannerUrl")} className="flex-1"/>
           <Btn th={th} v="sec" onClick={setBannerUrl}>{t("add")}</Btn>
