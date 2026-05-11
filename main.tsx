@@ -3501,8 +3501,10 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {t("needFollowUp")}
         </label>
         {form.needsFollowUp&&<Input th={th} label={t("followUpNote")} placeholder={t("followUpPlaceholder")} value={form.followUpNote} onChange={e=>setForm(f=>({...f,followUpNote:e.target.value}))}/>}
-        <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
-        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
+        <div className={cx("sticky bottom-0 pt-2 pb-1 flex flex-wrap gap-2",th==="dark"?"bg-slate-900/95":"bg-white/95","backdrop-blur supports-[backdrop-filter]:bg-opacity-90")}>
+          <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
+          {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
+        </div>
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
@@ -3516,8 +3518,10 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         {optionalForm.mapUrl&&<iframe src={optionalForm.mapUrl} title="optional-map-preview" loading="lazy" className="h-36 w-full rounded-2xl border border-white/10"/>}
         <Input th={th} label={t("reservationLink")} value={optionalForm.url} onChange={e=>setOptionalForm(f=>({...f,url:e.target.value}))}/>
         <Textarea th={th} label={t("optionalPlaceNotes")} value={optionalForm.notes} onChange={e=>setOptionalForm(f=>({...f,notes:e.target.value}))}/>
-        <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
-        {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
+        <div className={cx("sticky bottom-0 pt-2 pb-1 flex flex-wrap gap-2",th==="dark"?"bg-slate-900/95":"bg-white/95","backdrop-blur supports-[backdrop-filter]:bg-opacity-90")}>
+          <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
+          {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
+        </div>
       </form>}
       </div>
     </Card>
