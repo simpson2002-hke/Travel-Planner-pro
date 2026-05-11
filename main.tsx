@@ -3425,6 +3425,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <p className={cx("mt-2 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{activePane==="schedule" ? t("noItineraryDesc") : t("optionalPlacesDesc")}</p>
       </div>
 
+      <div className="lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto lg:pr-1">
       {activePane==="schedule" ? <form onSubmit={saveActivity} className="space-y-3">
         <div className="space-y-3 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
         <Select
@@ -3526,6 +3527,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
         </div>
       </form>}
+      </div>
     </Card>
   </div>;
 }
