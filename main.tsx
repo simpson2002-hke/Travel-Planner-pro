@@ -3750,15 +3750,27 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
-          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
-          <div className="flex flex-wrap gap-2">
-            {members.map(m=><button key={m.id} type="button" onClick={()=>toggleParticipant(m.id)}
-              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
-                form.participants.includes(m.id)||(form.participants.length===0)
-                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
-                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
-              {dn(m)}
-            </button>)}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
+            <div className="flex items-center gap-2">
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setForm(f=>({...f,participants:[]}))}>All</Btn>
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setForm(f=>({...f,participants:members.some(m=>m.id===user.id) ? [user.id] : (members[0] ? [members[0].id] : [])}))}>Only me</Btn>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {members.map(m=>{
+              const selected = form.participants.includes(m.id)||(form.participants.length===0);
+              return <button key={m.id} type="button" onClick={()=>toggleParticipant(m.id)}
+                className={cx("rounded-xl px-3 py-2 text-sm transition border text-left flex items-center justify-between",
+                  selected
+                    ? (th==="dark"?"border-cyan-300 bg-cyan-400/15 text-cyan-100":"border-slate-700 bg-slate-100 text-slate-900")
+                    : (th==="dark"?"border-white/10 bg-white/5 text-slate-400":"border-slate-200 bg-white text-slate-500"))}>
+                <span className="truncate pr-2">{dn(m)}</span>
+                <span className={cx("text-xs font-semibold",selected?(th==="dark"?"text-cyan-300":"text-slate-700"):(th==="dark"?"text-slate-500":"text-slate-400"))}>
+                  {selected ? "✓" : "○"}
+                </span>
+              </button>;
+            })}
           </div>
           {form.splitType==="equal"
             ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(perPerson,form.currency)}</p>
@@ -3796,15 +3808,27 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
-          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
-          <div className="flex flex-wrap gap-2">
-            {members.map(m=><button key={m.id} type="button" onClick={()=>toggleEditParticipant(m.id)}
-              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
-                editForm.participants.includes(m.id)||(editForm.participants.length===0)
-                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
-                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
-              {dn(m)}
-            </button>)}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
+            <div className="flex items-center gap-2">
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setEditForm(f=>({...f,participants:[]}))}>All</Btn>
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setEditForm(f=>({...f,participants:members.some(m=>m.id===user.id) ? [user.id] : (members[0] ? [members[0].id] : [])}))}>Only me</Btn>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {members.map(m=>{
+              const selected = editForm.participants.includes(m.id)||(editForm.participants.length===0);
+              return <button key={m.id} type="button" onClick={()=>toggleEditParticipant(m.id)}
+                className={cx("rounded-xl px-3 py-2 text-sm transition border text-left flex items-center justify-between",
+                  selected
+                    ? (th==="dark"?"border-cyan-300 bg-cyan-400/15 text-cyan-100":"border-slate-700 bg-slate-100 text-slate-900")
+                    : (th==="dark"?"border-white/10 bg-white/5 text-slate-400":"border-slate-200 bg-white text-slate-500"))}>
+                <span className="truncate pr-2">{dn(m)}</span>
+                <span className={cx("text-xs font-semibold",selected?(th==="dark"?"text-cyan-300":"text-slate-700"):(th==="dark"?"text-slate-500":"text-slate-400"))}>
+                  {selected ? "✓" : "○"}
+                </span>
+              </button>;
+            })}
           </div>
           {editForm.splitType==="equal"
             ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(editPerPerson,editForm.currency)}</p>
