@@ -2970,7 +2970,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     : memberStats;
 
   return <div className="space-y-5">
-    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
+    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] flex flex-col">
       <div className="grid sm:grid-cols-3 gap-3">
         <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
           <p className={cx("text-xs uppercase tracking-[0.16em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
@@ -3398,7 +3398,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
     </div>
 
-    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
+    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] flex flex-col">
       <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
         <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
@@ -3425,8 +3425,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <p className={cx("mt-2 text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{activePane==="schedule" ? t("noItineraryDesc") : t("optionalPlacesDesc")}</p>
       </div>
 
-      {activePane==="schedule" ? <form onSubmit={saveActivity} className="space-y-3">
-        <div className="space-y-3 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
+      {activePane==="schedule" ? <form onSubmit={saveActivity} className="space-y-3 flex flex-col min-h-0">
+        <div className="space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         <Select
           th={th}
           label={t("activityType")}
@@ -3506,8 +3506,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
           {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
         </div>
-      </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
-        <div className="space-y-3 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
+      </form> : <form onSubmit={saveOptionalStop} className="space-y-3 flex flex-col min-h-0">
+        <div className="space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
           <option value="site">{t("sight")}</option>
