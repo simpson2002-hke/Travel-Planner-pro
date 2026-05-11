@@ -3329,7 +3329,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         </div>
       </Card>
 
-      <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
+      <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
         <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
         </div>
@@ -3398,7 +3398,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
     </div>
 
-    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6">
+    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-hidden">
       <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
         <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
@@ -3426,6 +3426,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </div>
 
       {activePane==="schedule" ? <form onSubmit={saveActivity} className="space-y-3">
+        <div className="space-y-3 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
         <Select
           th={th}
           label={t("activityType")}
@@ -3500,9 +3501,13 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {t("needFollowUp")}
         </label>
         {form.needsFollowUp&&<Input th={th} label={t("followUpNote")} placeholder={t("followUpPlaceholder")} value={form.followUpNote} onChange={e=>setForm(f=>({...f,followUpNote:e.target.value}))}/>}
-        <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
-        {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
+        </div>
+        <div className={cx("pt-2 pb-1 flex flex-wrap gap-2 border-t",th==="dark"?"border-white/10":"border-slate-200")}>
+          <Btn th={th} type="submit" disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{editId?t("save"):t("add")}</Btn>
+          {editId&&<Btn th={th} v="sec" type="button" onClick={()=>{setEditId(null);setForm(emptyForm);}} disabled={!(canEdit || (form.activityType==="free-time"&&canEditFreeTime))}>{t("cancel")}</Btn>}
+        </div>
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3">
+        <div className="space-y-3 lg:max-h-[calc(100vh-22rem)] lg:overflow-y-auto lg:pr-1">
         <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
           <option value="site">{t("sight")}</option>
@@ -3515,8 +3520,11 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         {optionalForm.mapUrl&&<iframe src={optionalForm.mapUrl} title="optional-map-preview" loading="lazy" className="h-36 w-full rounded-2xl border border-white/10"/>}
         <Input th={th} label={t("reservationLink")} value={optionalForm.url} onChange={e=>setOptionalForm(f=>({...f,url:e.target.value}))}/>
         <Textarea th={th} label={t("optionalPlaceNotes")} value={optionalForm.notes} onChange={e=>setOptionalForm(f=>({...f,notes:e.target.value}))}/>
-        <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
-        {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
+        </div>
+        <div className={cx("pt-2 pb-1 flex flex-wrap gap-2 border-t",th==="dark"?"border-white/10":"border-slate-200")}>
+          <Btn th={th} type="submit" disabled={!canEdit}>{optionalEditId?t("save"):t("saveOptionalPlace")}</Btn>
+          {optionalEditId&&<Btn th={th} v="sec" type="button" onClick={()=>{setOptionalEditId(null);setOptionalForm({...emptyOptionalForm,day});}} disabled={!canEdit}>{t("cancel")}</Btn>}
+        </div>
       </form>}
     </Card>
   </div>;
