@@ -1924,6 +1924,13 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
     setOffsetY(0);
     e.target.value="";
   };
+  const useCurrentAsSource = ()=>{
+    if(!imageValue?.trim()) return;
+    setSourceImage(imageValue);
+    setZoom(1);
+    setOffsetX(0);
+    setOffsetY(0);
+  };
   useEffect(()=>{
     if(!sourceImage){setSourceMeta(null);return;}
     void loadImageFromSource(sourceImage).then(img=>setSourceMeta({width:img.width,height:img.height})).catch(()=>setSourceMeta(null));
@@ -1944,6 +1951,9 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
       th==="dark"?"border-white/10 bg-white/5 hover:bg-white/10":"border-slate-300 bg-white hover:bg-slate-50")}>
       📤 {t("uploadBanner")}<input type="file" accept="image/*" className="hidden" onChange={handleUpload}/>
     </label>
+    {imageValue&&<button type="button" onClick={useCurrentAsSource} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-cyan-500/15 text-cyan-300":"bg-cyan-50 text-cyan-700")}>
+      Reposition current banner
+    </button>}
     {sourceImage&&<div className="space-y-3">
       <label className="flex items-center gap-3 text-sm">
         <span className={th==="dark"?"text-slate-400":"text-slate-600"}>{t("zoom")}</span>
@@ -1956,7 +1966,7 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
         }} className="flex-1"/>
         <span className={th==="dark"?"text-slate-300":"text-slate-700"}>{zoom.toFixed(2)}x</span>
       </label>
-      <p className={cx("mb-2 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Drag image to adjust banner crop.</p>
+      <p className={cx("mb-2 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Drag image to choose the exact part shown in your banner.</p>
       <div
         className={cx("relative mx-auto overflow-hidden rounded-2xl border-2 touch-none",th==="dark"?"border-cyan-300/70 bg-black/20":"border-slate-400 bg-slate-100")}
         style={{width:PREVIEW_W,height:PREVIEW_H}}
