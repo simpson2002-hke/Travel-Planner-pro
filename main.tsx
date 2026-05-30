@@ -268,6 +268,12 @@ const tripCode = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
 const fmtDate = (v:string)=>v ? new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
+const fmtDateTime = (v:string)=>{
+  if(!v) return "—";
+  const date = new Date(v);
+  if(Number.isNaN(date.getTime())) return v;
+  return date.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"});
+};
 const fmtCur = (n:number,c="USD")=>new Intl.NumberFormat("en-US",{style:"currency",currency:c,maximumFractionDigits:2}).format(n);
 const upper = (v:string)=>v.trim().toUpperCase();
 const normalizeName = (v:string)=>upper(v);
@@ -1629,8 +1635,8 @@ function addFlightLegsToItinerary(base:ItineraryItem[], flightLegs:FlightLeg[], 
       stopLocation:`${dep} -> ${arr}`,
       transport:"Flight",
       details:[
-        leg.departureTime?`Departure: ${fmtDate(leg.departureTime)}`:"",
-        leg.arrivalTime?`Arrival: ${fmtDate(leg.arrivalTime)}`:"",
+        leg.departureTime?`Departure: ${fmtDateTime(leg.departureTime)}`:"",
+        leg.arrivalTime?`Arrival: ${fmtDateTime(leg.arrivalTime)}`:"",
         leg.terminal?`Terminal: ${leg.terminal}`:"",
         leg.bookingReference?`Booking: ${leg.bookingReference}`:"",
       ].filter(Boolean).join(" • "),
@@ -1687,7 +1693,7 @@ function Textarea(p:TextareaHTMLAttributes<HTMLTextAreaElement>&{label?:string;t
 
 function Btn(p:ButtonHTMLAttributes<HTMLButtonElement>&{th:ThemeMode;v?:"pri"|"sec"|"ghost"|"danger";sz?:"sm"|"md"}){
   const{th,v="pri",sz="md",className,...rest}=p;
-  return <button {...rest} className={cx("rounded-full font-medium transition disabled:opacity-40 whitespace-nowrap active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400/70",
+  return <button {...rest} className={cx("max-w-full rounded-full font-medium transition disabled:opacity-40 whitespace-normal break-words active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400/70 sm:whitespace-nowrap",
     sz==="sm"?"px-4 py-2 text-sm":"px-6 py-3",
     v==="pri"&&(th==="dark"?"bg-cyan-400 text-slate-950 hover:bg-cyan-300":"bg-slate-800 text-white hover:bg-slate-700"),
     v==="sec"&&(th==="dark"?"border border-white/15 bg-white/5 text-white hover:bg-white/10":"border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"),
@@ -1696,7 +1702,7 @@ function Btn(p:ButtonHTMLAttributes<HTMLButtonElement>&{th:ThemeMode;v?:"pri"|"s
 }
 
 function Card({children,th,className,onClick}:{children:ReactNode;th:ThemeMode;className?:string;onClick?:()=>void}){
-  return <div onClick={onClick} className={cx("rounded-3xl border transition-all",
+  return <div onClick={onClick} className={cx("min-w-0 max-w-full rounded-3xl border transition-all",
     th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200/80 bg-white/80 backdrop-blur",
     onClick&&"cursor-pointer hover:scale-[1.01]",className)}>{children}</div>;
 }
@@ -1704,7 +1710,7 @@ function Card({children,th,className,onClick}:{children:ReactNode;th:ThemeMode;c
 function Badge({label,th,color="slate"}:{label:string;th:ThemeMode;color?:"blue"|"green"|"amber"|"rose"|"slate"}){
   const c={blue:"bg-blue-500/15 text-blue-400",green:"bg-emerald-500/15 text-emerald-400",amber:th==="dark"?"bg-amber-300 text-slate-950 ring-1 ring-amber-200/80 shadow-lg shadow-amber-400/25":"bg-amber-600 text-white ring-1 ring-amber-500/60",
     rose:"bg-rose-500/15 text-rose-400",slate:th==="dark"?"bg-white/8 text-slate-300":"bg-slate-100 text-slate-600"};
-  return <span className={cx("rounded-full px-3 py-1 text-sm font-medium",c[color])}>{label}</span>;
+  return <span className={cx("max-w-full rounded-full px-3 py-1 text-sm font-medium break-words",c[color])}>{label}</span>;
 }
 
 function Tabs<T extends string>({tabs,active,onChange,th}:{tabs:{id:T;label:string;icon?:string}[];active:T;onChange:(id:T)=>void;th:ThemeMode}){
@@ -1891,8 +1897,11 @@ function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageCha
 }
 
 function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode;t:(k:TKey)=>string;imageValue:string;onImageChange:(value:string)=>void;message?:string}){
-  const PREVIEW_W = 320;
-  const PREVIEW_H = 128;
+  const PREVIEW_ASPECT = 3;
+  const OUTPUT_W = 1200;
+  const OUTPUT_H = 400;
+  const previewRef = useRef<HTMLDivElement|null>(null);
+  const [previewSize,setPreviewSize]=useState({width:320,height:107});
   const [sourceImage,setSourceImage]=useState<string>("");
   const [sourceMeta,setSourceMeta]=useState<{width:number;height:number}|null>(null);
   const [zoom,setZoom]=useState(1);
@@ -1901,19 +1910,21 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
   const dragState = useRef<{startX:number;startY:number;baseX:number;baseY:number;pointerId:number}|null>(null);
   const getOffsetLimit = useCallback((meta:{width:number;height:number}|null,nextZoom:number)=>{
     if(!meta) return {x:0,y:0};
-    const baseScale = Math.max(PREVIEW_W / Math.max(1,meta.width), PREVIEW_H / Math.max(1,meta.height));
+    const baseScale = Math.max(previewSize.width / Math.max(1,meta.width), previewSize.height / Math.max(1,meta.height));
     const drawW = meta.width * baseScale * nextZoom;
     const drawH = meta.height * baseScale * nextZoom;
-    return {x:Math.max(0,(drawW-PREVIEW_W)/2),y:Math.max(0,(drawH-PREVIEW_H)/2)};
-  },[]);
+    return {x:Math.max(0,(drawW-previewSize.width)/2),y:Math.max(0,(drawH-previewSize.height)/2)};
+  },[previewSize.height,previewSize.width]);
   const clampOffsets = useCallback((nextX:number,nextY:number,nextZoom=zoom)=>{
     const limit = getOffsetLimit(sourceMeta,nextZoom);
     return {x:Math.max(-limit.x,Math.min(limit.x,nextX)),y:Math.max(-limit.y,Math.min(limit.y,nextY))};
   },[getOffsetLimit,sourceMeta,zoom]);
   const processImage = useCallback(async(source:string,cropZoom:number,cropX:number,cropY:number)=>{
-    const cropped = await renderBannerImage(source,{width:1200,height:400,zoom:cropZoom,offsetX:cropX,offsetY:cropY,maxBytes:350_000});
+    const scaledX = previewSize.width ? cropX * (OUTPUT_W / previewSize.width) : cropX;
+    const scaledY = previewSize.height ? cropY * (OUTPUT_H / previewSize.height) : cropY;
+    const cropped = await renderBannerImage(source,{width:OUTPUT_W,height:OUTPUT_H,zoom:cropZoom,offsetX:scaledX,offsetY:scaledY,maxBytes:350_000});
     onImageChange(cropped);
-  },[onImageChange]);
+  },[onImageChange,previewSize.height,previewSize.width]);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];
     if(!file) return;
@@ -1934,6 +1945,19 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
   useEffect(()=>{
     if(!sourceImage){setSourceMeta(null);return;}
     void loadImageFromSource(sourceImage).then(img=>setSourceMeta({width:img.width,height:img.height})).catch(()=>setSourceMeta(null));
+  },[sourceImage]);
+  useEffect(()=>{
+    if(!sourceImage) return;
+    const node = previewRef.current;
+    if(!node) return;
+    const updateSize=()=>{
+      const width=Math.max(1,Math.round(node.clientWidth || 320));
+      setPreviewSize({width,height:Math.max(1,Math.round(width / PREVIEW_ASPECT))});
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(node);
+    return ()=>observer.disconnect();
   },[sourceImage]);
   useEffect(()=>{
     if(!sourceImage) return;
@@ -1969,7 +1993,8 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
       <p className={cx("mb-2 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>Drag image to choose the exact part shown in your banner.</p>
       <div
         className={cx("relative mx-auto overflow-hidden rounded-2xl border-2 touch-none",th==="dark"?"border-cyan-300/70 bg-black/20":"border-slate-400 bg-slate-100")}
-        style={{width:PREVIEW_W,height:PREVIEW_H}}
+        ref={previewRef}
+        style={{width:"100%",maxWidth:420,aspectRatio:String(PREVIEW_ASPECT)}}
         onPointerDown={e=>{
           dragState.current={startX:e.clientX,startY:e.clientY,baseX:offsetX,baseY:offsetY,pointerId:e.pointerId};
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -1991,8 +2016,8 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
         onPointerCancel={()=>{dragState.current=null;}}
       >
         {sourceMeta&&<img src={sourceImage} alt="Banner crop source" draggable={false} className="pointer-events-none select-none absolute max-w-none" style={{
-          width:sourceMeta.width * Math.max(PREVIEW_W / Math.max(1,sourceMeta.width), PREVIEW_H / Math.max(1,sourceMeta.height)) * zoom,
-          height:sourceMeta.height * Math.max(PREVIEW_W / Math.max(1,sourceMeta.width), PREVIEW_H / Math.max(1,sourceMeta.height)) * zoom,
+          width:sourceMeta.width * Math.max(previewSize.width / Math.max(1,sourceMeta.width), previewSize.height / Math.max(1,sourceMeta.height)) * zoom,
+          height:sourceMeta.height * Math.max(previewSize.width / Math.max(1,sourceMeta.width), previewSize.height / Math.max(1,sourceMeta.height)) * zoom,
           left:"50%",
           top:"50%",
           transform:`translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))`,
@@ -2522,6 +2547,13 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     id:"legacy-flight",airline:trip.airline,flightNumber:trip.flightNumber,departureAirport:trip.departureAirport,arrivalAirport:trip.arrivalAirport,
     departureTime:trip.departureTime,arrivalTime:trip.arrivalTime,terminal:trip.terminal,bookingReference:trip.bookingReference,notes:"",
   }].filter(leg=>Object.values(leg).some(Boolean));
+  const flightOverviewLines = flightLegs.length
+    ? flightLegs.map(leg=>[
+        [leg.airline, leg.flightNumber].filter(Boolean).join(" ") || t("flightDetails"),
+        leg.departureAirport && leg.arrivalAirport ? `${leg.departureAirport} → ${leg.arrivalAirport}` : "",
+        [leg.departureTime ? fmtDateTime(leg.departureTime) : "", leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : ""].filter(Boolean).join(" → "),
+      ].filter(Boolean).join(" · "))
+    : [];
   const hotels=trip.hotels.length>0?trip.hotels:[{
     id:"legacy-hotel",hotelName:trip.hotelName,hotelAddress:trip.hotelAddress,roomType:trip.roomType,checkIn:trip.checkIn,checkOut:trip.checkOut,confirmationCode:trip.confirmationCode,contact:"",notes:"",
   }].filter(stay=>Object.values(stay).some(Boolean));
@@ -2665,9 +2697,11 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
                 <p className="mt-2 text-3xl font-bold">{memberProfiles.length}</p>
               </div>
-              <div className={cx("rounded-3xl p-5",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
+              <div className={cx("rounded-3xl p-5 min-w-0 overflow-hidden",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
-                <p className="mt-2 text-lg font-semibold">{flightLegs.map(leg=>leg.flightNumber).filter(Boolean).join(", ") || "—"}</p>
+                <div className="mt-2 space-y-1 text-sm font-semibold leading-6 sm:text-base">
+                  {flightOverviewLines.length ? flightOverviewLines.map((line,index)=><p key={index} className="break-words">{line}</p>) : <p>—</p>}
+                </div>
               </div>
             </div>
           </div>
@@ -2722,8 +2756,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               th={th}
             />
             <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              <InfoRow label={t("departureTime")} value={leg.departureTime ? fmtDate(leg.departureTime) : "—"} th={th}/>
-              <InfoRow label={t("arrivalTime")} value={leg.arrivalTime ? fmtDate(leg.arrivalTime) : "—"} th={th}/>
+              <InfoRow label={t("departureTime")} value={leg.departureTime ? fmtDateTime(leg.departureTime) : "—"} th={th}/>
+              <InfoRow label={t("arrivalTime")} value={leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"} th={th}/>
               <InfoRow label={t("terminal")} value={leg.terminal || "—"} th={th}/>
               <InfoRow label={t("bookingReference")} value={leg.bookingReference || "—"} th={th}/>
             </div>
@@ -3132,19 +3166,21 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     large: "max-w-full",
   };
   const persistItems=(nextItems:ItineraryItem[])=>onUpdate(trip.id,nextItems);
+  const transportLabelFromForm = (draft:typeof form)=>draft.transportType==="Other" ? (draft.customTransport.trim() || "Other") : draft.transportType;
 
   const saveActivity=async(e:React.FormEvent)=>{
     e.preventDefault();
     if(!(canEdit || (form.activityType==="free-time" && canEditFreeTime))) return;
-    if(!form.title.trim())return;
     const transportLabel = form.activityType==="transport"
-      ? (form.transportType==="Other" ? (form.customTransport.trim() || "Other") : form.transportType)
+      ? transportLabelFromForm(form)
       : form.activityType==="free-time" ? "Free Time" : "Activity";
+    const activityTitle = form.activityType==="transport" ? transportLabel : form.title.trim();
+    if(!activityTitle)return;
     const payload={
       startTime:form.startTime,
       endTime:form.endTime,
       endDayOffset:form.endDayOffset,
-      title:form.title,
+      title:activityTitle,
       stopLocation:form.stopLocation,
       transport:transportLabel,
       details:form.details,
@@ -3447,7 +3483,10 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             if(mode==="free-time"){
               setForm(f=>({...f,activityType:"free-time",title:f.title||t("freeTime"),stopLocation:"",mapUrl:"",freeTimeParticipantIds:f.freeTimeParticipantIds??[]}));
             }else if(mode==="transport"){
-              setForm(f=>({...f,activityType:"transport",title:f.title||t("transport"),transportType:f.transportType||"Flight",customTransport:f.customTransport||"",freeTimeParticipantIds:[]}));
+              setForm(f=>{
+                const next={...f,activityType:"transport" as const,transportType:f.transportType||"Flight",customTransport:f.customTransport||"",freeTimeParticipantIds:[]};
+                return {...next,title:transportLabelFromForm(next)};
+              });
             }else{
               setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title,freeTimeParticipantIds:[]}));
             }
@@ -3456,10 +3495,16 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
         {form.activityType==="transport"&&<>
-          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>({...f,transportType:e.target.value}))}>
+          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>{
+            const next={...f,transportType:e.target.value};
+            return {...next,title:transportLabelFromForm(next)};
+          })}>
             {TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}
           </Select>
-          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>({...f,customTransport:e.target.value}))}/>}
+          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>{
+            const next={...f,customTransport:e.target.value};
+            return {...next,title:transportLabelFromForm(next)};
+          })}/>}
         </>}
         {form.activityType==="free-time"&&<div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>Invite travelers</p>
@@ -3477,7 +3522,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             })}
           </div>
         </div>}
-        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+        <Input th={th} label={t("activity")} value={form.activityType==="transport" ? transportLabelFromForm(form) : form.title} disabled={form.activityType==="transport"} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
         <Select th={th} label={t("timeMode")} value={form.timeMode} onChange={e=>{
           const nextMode=e.target.value as "timed"|"whole-day";
           setForm(f=>nextMode==="whole-day"
