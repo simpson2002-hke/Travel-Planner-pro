@@ -1908,6 +1908,7 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
   const [offsetX,setOffsetX]=useState(0);
   const [offsetY,setOffsetY]=useState(0);
   const dragState = useRef<{startX:number;startY:number;baseX:number;baseY:number;pointerId:number}|null>(null);
+  const renderSeq = useRef(0);
   const getOffsetLimit = useCallback((meta:{width:number;height:number}|null,nextZoom:number)=>{
     if(!meta) return {x:0,y:0};
     const baseScale = Math.max(previewSize.width / Math.max(1,meta.width), previewSize.height / Math.max(1,meta.height));
@@ -1920,10 +1921,11 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
     return {x:Math.max(-limit.x,Math.min(limit.x,nextX)),y:Math.max(-limit.y,Math.min(limit.y,nextY))};
   },[getOffsetLimit,sourceMeta,zoom]);
   const processImage = useCallback(async(source:string,cropZoom:number,cropX:number,cropY:number)=>{
+    const seq = ++renderSeq.current;
     const scaledX = previewSize.width ? cropX * (OUTPUT_W / previewSize.width) : cropX;
     const scaledY = previewSize.height ? cropY * (OUTPUT_H / previewSize.height) : cropY;
     const cropped = await renderBannerImage(source,{width:OUTPUT_W,height:OUTPUT_H,zoom:cropZoom,offsetX:scaledX,offsetY:scaledY,maxBytes:350_000});
-    onImageChange(cropped);
+    if(seq===renderSeq.current) onImageChange(cropped);
   },[onImageChange,previewSize.height,previewSize.width]);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];
@@ -2241,8 +2243,14 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
   const [form,setForm]=useState({...user});
 
   const now=new Date();
-  const upcoming=trips.filter(tr=>new Date(tr.startDate)>now).length;
-  const past=trips.filter(tr=>new Date(tr.endDate)<now).length;
+  const upcomingTrips=trips
+    .filter(tr=>getTripStatus(tr)!=="past")
+    .sort((a,b)=>Math.abs(new Date(a.startDate).getTime()-now.getTime())-Math.abs(new Date(b.startDate).getTime()-now.getTime()));
+  const endedTrips=trips
+    .filter(tr=>getTripStatus(tr)==="past")
+    .sort((a,b)=>new Date(b.endDate).getTime()-new Date(a.endDate).getTime());
+  const upcoming=upcomingTrips.length;
+  const past=endedTrips.length;
 
 
   const save=()=>{onUpdate(form);setEditMode(false);};
@@ -2314,17 +2322,22 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
         </div>
       </Card>
 
-      <div className="grid gap-4">
-        {trips.slice(0,4).map(tr=><Card key={tr.id} th={th} className="p-5 cursor-pointer hover:scale-[1.02] transition-transform" onClick={()=>onSelectTrip(tr.id)}>
-          <div className="flex gap-4">
-            {tr.bannerImage&&<img src={tr.bannerImage} alt="" className="w-20 h-20 rounded-xl object-cover"/>}
-            <div className="flex-1">
-              <p className="font-bold text-lg">{tr.title}</p>
-              <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)}</p>
-              <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate, t)}</p>
-            </div>
+      <div className="space-y-5">
+        {[{label:t("upcomingTrips"),items:upcomingTrips},{label:t("pastTrips"),items:endedTrips}].map(section=>section.items.length>0&&<section key={section.label} className="space-y-3">
+          <h3 className={cx("text-sm font-semibold uppercase tracking-wide",th==="dark"?"text-slate-400":"text-slate-600")}>{section.label}</h3>
+          <div className="grid gap-3">
+            {section.items.map(tr=><Card key={tr.id} th={th} className="p-5 cursor-pointer hover:scale-[1.02] transition-transform" onClick={()=>onSelectTrip(tr.id)}>
+              <div className="flex gap-4">
+                {tr.bannerImage&&<img src={tr.bannerImage} alt="" className="w-20 h-20 rounded-xl object-cover"/>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-lg break-words">{tr.title}</p>
+                  <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)} - {fmtDate(tr.endDate)}</p>
+                  <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate, t)}</p>
+                </div>
+              </div>
+            </Card>)}
           </div>
-        </Card>)}
+        </section>)}
       </div>
     </div>
   </div>;
@@ -2376,8 +2389,9 @@ function TripSelector({trips,th,t,onCreate,onJoin,onSelect}:{trips:Trip[];th:The
     if(res.ok){setShowJoin(false);setJoinCode("");}else setMsg(res.message);
   };
 
-  const activeTrips=trips.filter(tr=>getTripStatus(tr)!=="past");
-  const archivedTrips=trips.filter(tr=>getTripStatus(tr)==="past");
+  const nowForSort=new Date();
+  const activeTrips=trips.filter(tr=>getTripStatus(tr)!=="past").sort((a,b)=>Math.abs(new Date(a.startDate).getTime()-nowForSort.getTime())-Math.abs(new Date(b.startDate).getTime()-nowForSort.getTime()));
+  const archivedTrips=trips.filter(tr=>getTripStatus(tr)==="past").sort((a,b)=>new Date(b.endDate).getTime()-new Date(a.endDate).getTime());
 
   return <div className="space-y-6">
     <div className="flex gap-3">
@@ -2547,13 +2561,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     id:"legacy-flight",airline:trip.airline,flightNumber:trip.flightNumber,departureAirport:trip.departureAirport,arrivalAirport:trip.arrivalAirport,
     departureTime:trip.departureTime,arrivalTime:trip.arrivalTime,terminal:trip.terminal,bookingReference:trip.bookingReference,notes:"",
   }].filter(leg=>Object.values(leg).some(Boolean));
-  const flightOverviewLines = flightLegs.length
-    ? flightLegs.map(leg=>[
-        [leg.airline, leg.flightNumber].filter(Boolean).join(" ") || t("flightDetails"),
-        leg.departureAirport && leg.arrivalAirport ? `${leg.departureAirport} → ${leg.arrivalAirport}` : "",
-        [leg.departureTime ? fmtDateTime(leg.departureTime) : "", leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : ""].filter(Boolean).join(" → "),
-      ].filter(Boolean).join(" · "))
-    : [];
+
   const hotels=trip.hotels.length>0?trip.hotels:[{
     id:"legacy-hotel",hotelName:trip.hotelName,hotelAddress:trip.hotelAddress,roomType:trip.roomType,checkIn:trip.checkIn,checkOut:trip.checkOut,confirmationCode:trip.confirmationCode,contact:"",notes:"",
   }].filter(stay=>Object.values(stay).some(Boolean));
@@ -2699,8 +2707,17 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               </div>
               <div className={cx("rounded-3xl p-5 min-w-0 overflow-hidden",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
-                <div className="mt-2 space-y-1 text-sm font-semibold leading-6 sm:text-base">
-                  {flightOverviewLines.length ? flightOverviewLines.map((line,index)=><p key={index} className="break-words">{line}</p>) : <p>—</p>}
+                <div className="mt-3 space-y-3">
+                  {flightLegs.length ? flightLegs.map((leg,index)=><div key={leg.id || index} className={cx("rounded-2xl border p-3",th==="dark"?"border-white/10 bg-slate-950/30":"border-slate-200 bg-white")}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-bold break-words">{[leg.airline, leg.flightNumber].filter(Boolean).join(" ") || `${t("flightDetails")} ${index+1}`}</p>
+                      <span className={cx("rounded-full px-2.5 py-1 text-xs font-semibold",th==="dark"?"bg-cyan-400/15 text-cyan-200":"bg-blue-50 text-blue-700")}>{leg.departureAirport || "—"} → {leg.arrivalAirport || "—"}</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                      <div><p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("departureDate")}</p><p className="font-semibold break-words">{leg.departureTime ? fmtDateTime(leg.departureTime) : "—"}</p></div>
+                      <div><p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("arrivalDate")}</p><p className="font-semibold break-words">{leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"}</p></div>
+                    </div>
+                  </div>) : <p>—</p>}
                 </div>
               </div>
             </div>
@@ -3174,7 +3191,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     const transportLabel = form.activityType==="transport"
       ? transportLabelFromForm(form)
       : form.activityType==="free-time" ? "Free Time" : "Activity";
-    const activityTitle = form.activityType==="transport" ? transportLabel : form.title.trim();
+    const activityTitle = form.title.trim();
     if(!activityTitle)return;
     const payload={
       startTime:form.startTime,
@@ -3485,7 +3502,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             }else if(mode==="transport"){
               setForm(f=>{
                 const next={...f,activityType:"transport" as const,transportType:f.transportType||"Flight",customTransport:f.customTransport||"",freeTimeParticipantIds:[]};
-                return {...next,title:transportLabelFromForm(next)};
+                return {...next,title:f.title || transportLabelFromForm(next)};
               });
             }else{
               setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title,freeTimeParticipantIds:[]}));
@@ -3495,16 +3512,10 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
         {form.activityType==="transport"&&<>
-          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>{
-            const next={...f,transportType:e.target.value};
-            return {...next,title:transportLabelFromForm(next)};
-          })}>
+          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>({...f,transportType:e.target.value}))}>
             {TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}
           </Select>
-          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>{
-            const next={...f,customTransport:e.target.value};
-            return {...next,title:transportLabelFromForm(next)};
-          })}/>}
+          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>({...f,customTransport:e.target.value}))}/>}
         </>}
         {form.activityType==="free-time"&&<div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>Invite travelers</p>
@@ -3522,7 +3533,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             })}
           </div>
         </div>}
-        <Input th={th} label={t("activity")} value={form.activityType==="transport" ? transportLabelFromForm(form) : form.title} disabled={form.activityType==="transport"} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
         <Select th={th} label={t("timeMode")} value={form.timeMode} onChange={e=>{
           const nextMode=e.target.value as "timed"|"whole-day";
           setForm(f=>nextMode==="whole-day"
