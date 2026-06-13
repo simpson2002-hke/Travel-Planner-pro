@@ -99,7 +99,7 @@ type Trip = {
   flightLegs: FlightLeg[]; hotels: HotelStay[];
   transportMode: string; notes: string;
   travelNotes: TravelNote[];
-  bannerColor: string; bannerImage: string;
+  bannerColor: string; bannerImage: string; bannerImageSource?: string;
   memberRoles: Record<string, TripRole>;
   members: string[]; expenses: Expense[];
   itineraryChecklists: Record<string, Record<string, boolean>>;
@@ -951,7 +951,7 @@ function normTrip(i:unknown):Trip{
     })),
     transportMode:t.transportMode??"Transit", notes:t.notes??"",
     travelNotes:Array.isArray(t.travelNotes)?t.travelNotes:[],
-    bannerColor:t.bannerColor??"#2563eb", bannerImage:t.bannerImage??"",
+    bannerColor:t.bannerColor??"#2563eb", bannerImage:t.bannerImage??"", bannerImageSource:t.bannerImageSource??"",
     memberRoles, members, expenses:Array.isArray(t.expenses)?t.expenses.map((expense,index)=>({
       id: expense.id ?? uid(`ex-${index}`),
       date: expense.date ?? "",
@@ -1483,6 +1483,7 @@ async function readImageFile(file:File,{maxDimension=1600,maxBytes=350_000}:{max
 function loadImageFromSource(src:string){
   return new Promise<HTMLImageElement>((resolve,reject)=>{
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = ()=>resolve(img);
     img.onerror = ()=>reject(new Error("Failed to decode image."));
     img.src = src;
@@ -1896,7 +1897,7 @@ function AvatarPicker({th,t,label,emojiValue,imageValue,onEmojiChange,onImageCha
   </div>;
 }
 
-function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode;t:(k:TKey)=>string;imageValue:string;onImageChange:(value:string)=>void;message?:string}){
+function BannerImagePicker({th,t,imageValue,sourceValue,onImageChange,onSourceChange,message}:{th:ThemeMode;t:(k:TKey)=>string;imageValue:string;sourceValue?:string;onImageChange:(value:string)=>void;onSourceChange?:(value:string)=>void;message?:string}){
   const PREVIEW_ASPECT = 3;
   const OUTPUT_W = 1200;
   const OUTPUT_H = 400;
@@ -1921,25 +1922,27 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
     return {x:Math.max(-limit.x,Math.min(limit.x,nextX)),y:Math.max(-limit.y,Math.min(limit.y,nextY))};
   },[getOffsetLimit,sourceMeta,zoom]);
   const processImage = useCallback(async(source:string,cropZoom:number,cropX:number,cropY:number)=>{
-    const seq = ++renderSeq.current;
     const scaledX = previewSize.width ? cropX * (OUTPUT_W / previewSize.width) : cropX;
     const scaledY = previewSize.height ? cropY * (OUTPUT_H / previewSize.height) : cropY;
     const cropped = await renderBannerImage(source,{width:OUTPUT_W,height:OUTPUT_H,zoom:cropZoom,offsetX:scaledX,offsetY:scaledY,maxBytes:350_000});
-    if(seq===renderSeq.current) onImageChange(cropped);
+    onImageChange(cropped);
   },[onImageChange,previewSize.height,previewSize.width]);
   const handleUpload = async(e:ChangeEvent<HTMLInputElement>)=>{
     const file=e.target.files?.[0];
     if(!file) return;
-    const raw=await readFile(file);
-    setSourceImage(raw);
+    const source=await readImageFile(file,{maxDimension:2200,maxBytes:900_000});
+    onSourceChange?.(source);
+    setSourceImage(source);
     setZoom(1);
     setOffsetX(0);
     setOffsetY(0);
     e.target.value="";
   };
   const useCurrentAsSource = ()=>{
-    if(!imageValue?.trim()) return;
-    setSourceImage(imageValue);
+    const source = sourceValue?.trim() || imageValue?.trim();
+    if(!source) return;
+    if(!sourceValue?.trim()) onSourceChange?.(source);
+    setSourceImage(source);
     setZoom(1);
     setOffsetX(0);
     setOffsetY(0);
@@ -1971,13 +1974,13 @@ function BannerImagePicker({th,t,imageValue,onImageChange,message}:{th:ThemeMode
   return <div className="space-y-3">
     {imageValue&&<div className="mb-3 relative">
       <img src={imageValue} alt="Banner" className="w-full h-40 object-cover rounded-2xl"/>
-      <button type="button" onClick={()=>onImageChange("")} className="absolute top-2 right-2 px-3 py-1 rounded-full bg-rose-500 text-white text-sm font-medium">{t("removeBanner")}</button>
+      <button type="button" onClick={()=>{onImageChange("");onSourceChange?.("");setSourceImage("");}} className="absolute top-2 right-2 px-3 py-1 rounded-full bg-rose-500 text-white text-sm font-medium">{t("removeBanner")}</button>
     </div>}
     <label className={cx("flex items-center gap-2 px-4 py-3 rounded-2xl border cursor-pointer transition",
       th==="dark"?"border-white/10 bg-white/5 hover:bg-white/10":"border-slate-300 bg-white hover:bg-slate-50")}>
       📤 {t("uploadBanner")}<input type="file" accept="image/*" className="hidden" onChange={handleUpload}/>
     </label>
-    {imageValue&&<button type="button" onClick={useCurrentAsSource} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-cyan-500/15 text-cyan-300":"bg-cyan-50 text-cyan-700")}>
+    {(sourceValue || imageValue)&&<button type="button" onClick={useCurrentAsSource} className={cx("rounded-full px-3 py-1 text-sm",th==="dark"?"bg-cyan-500/15 text-cyan-300":"bg-cyan-50 text-cyan-700")}>
       Reposition current banner
     </button>}
     {sourceImage&&<div className="space-y-3">
@@ -2561,7 +2564,13 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     id:"legacy-flight",airline:trip.airline,flightNumber:trip.flightNumber,departureAirport:trip.departureAirport,arrivalAirport:trip.arrivalAirport,
     departureTime:trip.departureTime,arrivalTime:trip.arrivalTime,terminal:trip.terminal,bookingReference:trip.bookingReference,notes:"",
   }].filter(leg=>Object.values(leg).some(Boolean));
-
+  const flightOverviewLines = flightLegs.length
+    ? flightLegs.map(leg=>[
+        [leg.airline, leg.flightNumber].filter(Boolean).join(" ") || t("flightDetails"),
+        leg.departureAirport && leg.arrivalAirport ? `${leg.departureAirport} → ${leg.arrivalAirport}` : "",
+        [leg.departureTime ? fmtDateTime(leg.departureTime) : "", leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : ""].filter(Boolean).join(" → "),
+      ].filter(Boolean).join(" · "))
+    : [];
   const hotels=trip.hotels.length>0?trip.hotels:[{
     id:"legacy-hotel",hotelName:trip.hotelName,hotelAddress:trip.hotelAddress,roomType:trip.roomType,checkIn:trip.checkIn,checkOut:trip.checkOut,confirmationCode:trip.confirmationCode,contact:"",notes:"",
   }].filter(stay=>Object.values(stay).some(Boolean));
@@ -2707,17 +2716,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               </div>
               <div className={cx("rounded-3xl p-5 min-w-0 overflow-hidden",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
-                <div className="mt-3 space-y-3">
-                  {flightLegs.length ? flightLegs.map((leg,index)=><div key={leg.id || index} className={cx("rounded-2xl border p-3",th==="dark"?"border-white/10 bg-slate-950/30":"border-slate-200 bg-white")}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-bold break-words">{[leg.airline, leg.flightNumber].filter(Boolean).join(" ") || `${t("flightDetails")} ${index+1}`}</p>
-                      <span className={cx("rounded-full px-2.5 py-1 text-xs font-semibold",th==="dark"?"bg-cyan-400/15 text-cyan-200":"bg-blue-50 text-blue-700")}>{leg.departureAirport || "—"} → {leg.arrivalAirport || "—"}</span>
-                    </div>
-                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                      <div><p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("departureDate")}</p><p className="font-semibold break-words">{leg.departureTime ? fmtDateTime(leg.departureTime) : "—"}</p></div>
-                      <div><p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("arrivalDate")}</p><p className="font-semibold break-words">{leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"}</p></div>
-                    </div>
-                  </div>) : <p>—</p>}
+                <div className="mt-2 space-y-1 text-sm font-semibold leading-6 sm:text-base">
+                  {flightOverviewLines.length ? flightOverviewLines.map((line,index)=><p key={index} className="break-words">{line}</p>) : <p>—</p>}
                 </div>
               </div>
             </div>
@@ -3191,7 +3191,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     const transportLabel = form.activityType==="transport"
       ? transportLabelFromForm(form)
       : form.activityType==="free-time" ? "Free Time" : "Activity";
-    const activityTitle = form.title.trim();
+    const activityTitle = form.activityType==="transport" ? transportLabel : form.title.trim();
     if(!activityTitle)return;
     const payload={
       startTime:form.startTime,
@@ -3502,7 +3502,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             }else if(mode==="transport"){
               setForm(f=>{
                 const next={...f,activityType:"transport" as const,transportType:f.transportType||"Flight",customTransport:f.customTransport||"",freeTimeParticipantIds:[]};
-                return {...next,title:f.title || transportLabelFromForm(next)};
+                return {...next,title:transportLabelFromForm(next)};
               });
             }else{
               setForm(f=>({...f,activityType:"regular",title:f.title===t("freeTime")?"":f.title,freeTimeParticipantIds:[]}));
@@ -3512,10 +3512,16 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           {ACTIVITY_TYPE_OPTIONS.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}
         </Select>
         {form.activityType==="transport"&&<>
-          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>({...f,transportType:e.target.value}))}>
+          <Select th={th} label={t("transportType")} value={form.transportType} onChange={e=>setForm(f=>{
+            const next={...f,transportType:e.target.value};
+            return {...next,title:transportLabelFromForm(next)};
+          })}>
             {TRANSPORT_OPTIONS.map(option=><option key={option} value={option}>{option}</option>)}
           </Select>
-          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>({...f,customTransport:e.target.value}))}/>}
+          {form.transportType==="Other"&&<Input th={th} label={t("customTransportType")} value={form.customTransport} onChange={e=>setForm(f=>{
+            const next={...f,customTransport:e.target.value};
+            return {...next,title:transportLabelFromForm(next)};
+          })}/>}
         </>}
         {form.activityType==="free-time"&&<div>
           <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>Invite travelers</p>
@@ -3533,7 +3539,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             })}
           </div>
         </div>}
-        <Input th={th} label={t("activity")} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+        <Input th={th} label={t("activity")} value={form.activityType==="transport" ? transportLabelFromForm(form) : form.title} disabled={form.activityType==="transport"} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
         <Select th={th} label={t("timeMode")} value={form.timeMode} onChange={e=>{
           const nextMode=e.target.value as "timed"|"whole-day";
           setForm(f=>nextMode==="whole-day"
@@ -4228,8 +4234,9 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   };
 
   const setBannerUrl=()=>{
-    if(form.bannerImageUrl.trim()){
-      setForm(f=>({...f,bannerImage:f.bannerImageUrl.trim(),bannerImageUrl:""}));
+    const bannerUrl=form.bannerImageUrl.trim();
+    if(bannerUrl){
+      setForm(f=>({...f,bannerImage:bannerUrl,bannerImageSource:bannerUrl,bannerImageUrl:""}));
     }
   };
 
@@ -4516,8 +4523,8 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
     {(!isMobileScreen||mobileDetailSection==="banner")&&<div>
       <p className="mb-2 font-medium">{t("bannerImage")}</p>
       <div className="space-y-3">
-        <BannerImagePicker th={th} t={t} imageValue={form.bannerImage} message={bannerMessage} onImageChange={value=>{
-          setForm(f=>({...f,bannerImage:value}));
+        <BannerImagePicker th={th} t={t} imageValue={form.bannerImage} sourceValue={form.bannerImageSource} message={bannerMessage} onSourceChange={value=>setForm(f=>({...f,bannerImageSource:value}))} onImageChange={value=>{
+          setForm(f=>({...f,bannerImage:value,bannerImageSource:value ? f.bannerImageSource : ""}));
           if(value) setBannerMessage(t("bannerUploadedRememberSave"));
         }}/>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -5074,7 +5081,7 @@ export function App(){
       flightNumber:"",airline:"",departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",
       hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",transportMode:"Transit",notes:"",travelNotes:[],
       flightLegs:[],hotels:[],
-      bannerColor:"#2563eb",bannerImage:"",memberRoles:{[user.id]:"owner"},members:[user.id],expenses:[],
+      bannerColor:"#2563eb",bannerImage:"",bannerImageSource:"",memberRoles:{[user.id]:"owner"},members:[user.id],expenses:[],
       itineraryChecklists:{[user.id]:{}},packingList:packing,
       itinerary:[],optionalStops:[],freeTimeEntries:[],createdAt:new Date().toISOString(),
       luggageTemplateVersion: luggageTemplateVersion(siteCfg),
