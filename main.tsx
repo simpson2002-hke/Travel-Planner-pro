@@ -1909,6 +1909,7 @@ function BannerImagePicker({th,t,imageValue,sourceValue,onImageChange,onSourceCh
   const [offsetX,setOffsetX]=useState(0);
   const [offsetY,setOffsetY]=useState(0);
   const dragState = useRef<{startX:number;startY:number;baseX:number;baseY:number;pointerId:number}|null>(null);
+  const renderSeq = useRef(0);
   const getOffsetLimit = useCallback((meta:{width:number;height:number}|null,nextZoom:number)=>{
     if(!meta) return {x:0,y:0};
     const baseScale = Math.max(previewSize.width / Math.max(1,meta.width), previewSize.height / Math.max(1,meta.height));
@@ -2245,8 +2246,14 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
   const [form,setForm]=useState({...user});
 
   const now=new Date();
-  const upcoming=trips.filter(tr=>new Date(tr.startDate)>now).length;
-  const past=trips.filter(tr=>new Date(tr.endDate)<now).length;
+  const upcomingTrips=trips
+    .filter(tr=>getTripStatus(tr)!=="past")
+    .sort((a,b)=>Math.abs(new Date(a.startDate).getTime()-now.getTime())-Math.abs(new Date(b.startDate).getTime()-now.getTime()));
+  const endedTrips=trips
+    .filter(tr=>getTripStatus(tr)==="past")
+    .sort((a,b)=>new Date(b.endDate).getTime()-new Date(a.endDate).getTime());
+  const upcoming=upcomingTrips.length;
+  const past=endedTrips.length;
 
 
   const save=()=>{onUpdate(form);setEditMode(false);};
@@ -2318,17 +2325,22 @@ function Dashboard({user,trips,th,t,onUpdate,onSelectTrip}:{user:Profile;trips:T
         </div>
       </Card>
 
-      <div className="grid gap-4">
-        {trips.slice(0,4).map(tr=><Card key={tr.id} th={th} className="p-5 cursor-pointer hover:scale-[1.02] transition-transform" onClick={()=>onSelectTrip(tr.id)}>
-          <div className="flex gap-4">
-            {tr.bannerImage&&<img src={tr.bannerImage} alt="" className="w-20 h-20 rounded-xl object-cover"/>}
-            <div className="flex-1">
-              <p className="font-bold text-lg">{tr.title}</p>
-              <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)}</p>
-              <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate, t)}</p>
-            </div>
+      <div className="space-y-5">
+        {[{label:t("upcomingTrips"),items:upcomingTrips},{label:t("pastTrips"),items:endedTrips}].map(section=>section.items.length>0&&<section key={section.label} className="space-y-3">
+          <h3 className={cx("text-sm font-semibold uppercase tracking-wide",th==="dark"?"text-slate-400":"text-slate-600")}>{section.label}</h3>
+          <div className="grid gap-3">
+            {section.items.map(tr=><Card key={tr.id} th={th} className="p-5 cursor-pointer hover:scale-[1.02] transition-transform" onClick={()=>onSelectTrip(tr.id)}>
+              <div className="flex gap-4">
+                {tr.bannerImage&&<img src={tr.bannerImage} alt="" className="w-20 h-20 rounded-xl object-cover"/>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-lg break-words">{tr.title}</p>
+                  <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{tr.location} · {fmtDate(tr.startDate)} - {fmtDate(tr.endDate)}</p>
+                  <p className={cx("mt-1 text-xs font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{tripCountdownLabel(tr.startDate, tr.endDate, t)}</p>
+                </div>
+              </div>
+            </Card>)}
           </div>
-        </Card>)}
+        </section>)}
       </div>
     </div>
   </div>;
@@ -2380,8 +2392,9 @@ function TripSelector({trips,th,t,onCreate,onJoin,onSelect}:{trips:Trip[];th:The
     if(res.ok){setShowJoin(false);setJoinCode("");}else setMsg(res.message);
   };
 
-  const activeTrips=trips.filter(tr=>getTripStatus(tr)!=="past");
-  const archivedTrips=trips.filter(tr=>getTripStatus(tr)==="past");
+  const nowForSort=new Date();
+  const activeTrips=trips.filter(tr=>getTripStatus(tr)!=="past").sort((a,b)=>Math.abs(new Date(a.startDate).getTime()-nowForSort.getTime())-Math.abs(new Date(b.startDate).getTime()-nowForSort.getTime()));
+  const archivedTrips=trips.filter(tr=>getTripStatus(tr)==="past").sort((a,b)=>new Date(b.endDate).getTime()-new Date(a.endDate).getTime());
 
   return <div className="space-y-6">
     <div className="flex gap-3">
@@ -3810,15 +3823,27 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
-          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
-          <div className="flex flex-wrap gap-2">
-            {members.map(m=><button key={m.id} type="button" onClick={()=>toggleParticipant(m.id)}
-              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
-                form.participants.includes(m.id)||(form.participants.length===0)
-                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
-                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
-              {dn(m)}
-            </button>)}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({form.participants.length||members.length})</p>
+            <div className="flex items-center gap-2">
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setForm(f=>({...f,participants:[]}))}>All</Btn>
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setForm(f=>({...f,participants:members.some(m=>m.id===user.id) ? [user.id] : (members[0] ? [members[0].id] : [])}))}>Only me</Btn>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {members.map(m=>{
+              const selected = form.participants.includes(m.id)||(form.participants.length===0);
+              return <button key={m.id} type="button" onClick={()=>toggleParticipant(m.id)}
+                className={cx("rounded-xl px-3 py-2 text-sm transition border text-left flex items-center justify-between",
+                  selected
+                    ? (th==="dark"?"border-cyan-300 bg-cyan-400/15 text-cyan-100":"border-slate-700 bg-slate-100 text-slate-900")
+                    : (th==="dark"?"border-white/10 bg-white/5 text-slate-400":"border-slate-200 bg-white text-slate-500"))}>
+                <span className="truncate pr-2">{dn(m)}</span>
+                <span className={cx("text-xs font-semibold",selected?(th==="dark"?"text-cyan-300":"text-slate-700"):(th==="dark"?"text-slate-500":"text-slate-400"))}>
+                  {selected ? "✓" : "○"}
+                </span>
+              </button>;
+            })}
           </div>
           {form.splitType==="equal"
             ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(perPerson,form.currency)}</p>
@@ -3856,15 +3881,27 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
         <div>
-          <p className={cx("text-sm mb-2",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
-          <div className="flex flex-wrap gap-2">
-            {members.map(m=><button key={m.id} type="button" onClick={()=>toggleEditParticipant(m.id)}
-              className={cx("px-3 py-1.5 rounded-full text-sm font-medium transition",
-                editForm.participants.includes(m.id)||(editForm.participants.length===0)
-                  ?(th==="dark"?"bg-cyan-400 text-slate-950":"bg-slate-800 text-white")
-                  :(th==="dark"?"bg-white/5 text-slate-400":"bg-slate-100 text-slate-500"))}>
-              {dn(m)}
-            </button>)}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>{t("splitWith")} ({editForm.participants.length||members.length})</p>
+            <div className="flex items-center gap-2">
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setEditForm(f=>({...f,participants:[]}))}>All</Btn>
+              <Btn th={th} type="button" v="ghost" sz="sm" onClick={()=>setEditForm(f=>({...f,participants:members.some(m=>m.id===user.id) ? [user.id] : (members[0] ? [members[0].id] : [])}))}>Only me</Btn>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {members.map(m=>{
+              const selected = editForm.participants.includes(m.id)||(editForm.participants.length===0);
+              return <button key={m.id} type="button" onClick={()=>toggleEditParticipant(m.id)}
+                className={cx("rounded-xl px-3 py-2 text-sm transition border text-left flex items-center justify-between",
+                  selected
+                    ? (th==="dark"?"border-cyan-300 bg-cyan-400/15 text-cyan-100":"border-slate-700 bg-slate-100 text-slate-900")
+                    : (th==="dark"?"border-white/10 bg-white/5 text-slate-400":"border-slate-200 bg-white text-slate-500"))}>
+                <span className="truncate pr-2">{dn(m)}</span>
+                <span className={cx("text-xs font-semibold",selected?(th==="dark"?"text-cyan-300":"text-slate-700"):(th==="dark"?"text-slate-500":"text-slate-400"))}>
+                  {selected ? "✓" : "○"}
+                </span>
+              </button>;
+            })}
           </div>
           {editForm.splitType==="equal"
             ? <p className={cx("text-sm mt-2",th==="dark"?"text-slate-400":"text-slate-500")}>{t("perPerson")}: {fmtCur(editPerPerson,editForm.currency)}</p>
