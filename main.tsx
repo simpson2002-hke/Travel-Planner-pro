@@ -3433,7 +3433,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     }
   },[day,swapTargetDay,trip.duration]);
 
-  return <div className="grid min-w-0 gap-6 lg:grid-cols-[1.45fr_.95fr]">
+  return <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
     <div className="space-y-5">
       <Card th={th} className="p-5 space-y-4">
         <div className="grid sm:grid-cols-4 gap-3">
@@ -3445,8 +3445,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
 
       <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
-        <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
-          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
+        <div className="mb-4 -mx-1 flex min-w-0 items-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin]">
+          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("flex-none rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -3513,14 +3513,14 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
     </div>
 
-    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] flex flex-col">
-      <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
-        <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
+    <Card th={th} className="p-5 sm:p-6 h-fit xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] flex flex-col min-w-0">
+      <div className={cx("mb-4 w-full rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+        <p className="text-base font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
           {t("swapItineraryHelp").replace("{day}",dayLabel(day))}
         </p>
-        <div className="mt-3 flex flex-col gap-2">
-          <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))}>
+        <div className="mt-4 grid gap-3">
+          <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full">
             {Array.from({length:trip.duration},(_,i)=>i+1)
               .filter(d=>d!==day)
               .map(d=><option key={`swap-sidebar-${d}`} value={d}>{dayLabel(d)}</option>)}
@@ -3528,7 +3528,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           <button
             onClick={()=>swapDaySchedule(swapTargetDay)}
             disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
-            className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
+            className={cx("w-full rounded-2xl px-4 py-3 text-sm font-semibold border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
           >
             {t("swapDayButton").replace("{dayA}",dayLabel(day)).replace("{dayB}",dayLabel(swapTargetDay))}
           </button>
