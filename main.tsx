@@ -273,6 +273,29 @@ const tripCode = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
 const fmtDate = (v:string)=>v ? new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
+const tripDateForDay = (startDate:string, day:number)=>{
+  if(!startDate || !Number.isFinite(day)) return null;
+  const date = new Date(startDate);
+  if(Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate()+day-1);
+  return date;
+};
+const fmtDateWithWeekday = (v:string)=>{
+  if(!v) return "—";
+  const date = new Date(v);
+  if(Number.isNaN(date.getTime())) return v;
+  return date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+};
+const fmtTripDayDate = (startDate:string, day:number)=>{
+  const date = tripDateForDay(startDate, day);
+  return date ? fmtDateWithWeekday(date.toISOString()) : `${day}`;
+};
+const toDateKey = (v:string)=>{
+  if(!v) return "";
+  const date = new Date(v);
+  if(Number.isNaN(date.getTime())) return v.slice(0,10);
+  return date.toISOString().slice(0,10);
+};
 const fmtDateTime = (v:string)=>{
   if(!v) return "—";
   const date = new Date(v);
@@ -1245,7 +1268,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     ${sectionSet.has("itinerary") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("itinerary"))}</h2>
       ${itineraryByDay.map(({day, items, optionalStops})=>`<div class="day">
-        <h3>${escapeHtml(t("day"))} ${day}</h3>
+        <h3>${escapeHtml(fmtTripDayDate(trip.startDate, day))}</h3>
         ${items.length ? items.map(item=>`<div class="card">
           <div class="row">
             <div>
@@ -3191,6 +3214,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
   const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
+  const dayLabel = (dayNumber:number)=>fmtTripDayDate(trip.startDate, dayNumber);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
     : canEdit;
@@ -3265,7 +3289,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const swapDaySchedule=(targetDay:number)=>{
     if(!canEdit || trip.duration < 2) return;
     if(!Number.isInteger(targetDay) || targetDay < 1 || targetDay > trip.duration || targetDay===day){
-      window.alert(`Please enter a valid day number between 1 and ${trip.duration}, excluding Day ${day}.`);
+      window.alert(`Please choose a valid date, excluding ${dayLabel(day)}.`);
       return;
     }
     const next = trip.itinerary.map(item=>{
@@ -3414,7 +3438,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       <Card th={th} className="p-5 space-y-4">
         <div className="grid sm:grid-cols-4 gap-3">
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-2xl font-bold">{day}/{trip.duration}</p></div>
+          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{trip.optionalStops.length}</p></div>
         </div>
@@ -3422,7 +3446,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 
       <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
         <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
-          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
+          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -3435,7 +3459,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             </Select>
           </div>
           <div className="space-y-2 text-sm">
-            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("noTravelerActivities").replace("{day}",String(day))}</p>
+            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("noTravelerActivities").replace("{day}",dayLabel(day))}</p>
               :splitTimeline.map(entry=><p key={`it-${entry.item.id}`} className="break-words">🗓️ {entry.item.startTime} {entry.item.title}</p>)}
           </div>
         </div>
@@ -3493,20 +3517,20 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
         <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-          {t("swapItineraryHelp").replace("{day}",String(day))}
+          {t("swapItineraryHelp").replace("{day}",dayLabel(day))}
         </p>
         <div className="mt-3 flex flex-col gap-2">
           <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))}>
             {Array.from({length:trip.duration},(_,i)=>i+1)
               .filter(d=>d!==day)
-              .map(d=><option key={`swap-sidebar-${d}`} value={d}>{t("day")} {d}</option>)}
+              .map(d=><option key={`swap-sidebar-${d}`} value={d}>{dayLabel(d)}</option>)}
           </Select>
           <button
             onClick={()=>swapDaySchedule(swapTargetDay)}
             disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
             className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
           >
-            {t("swapDayButton").replace("{dayA}",String(day)).replace("{dayB}",String(swapTargetDay))}
+            {t("swapDayButton").replace("{dayA}",dayLabel(day)).replace("{dayB}",dayLabel(swapTargetDay))}
           </button>
         </div>
       </div>
@@ -3608,7 +3632,9 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         </div>
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3 flex flex-col min-h-0">
         <div className="space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-        <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
+        <Select th={th} label={t("date")} value={String(optionalForm.day)} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}>
+          {Array.from({length:trip.duration},(_,i)=>i+1).map(dayNumber=><option key={`optional-day-${dayNumber}`} value={dayNumber}>{dayLabel(dayNumber)}</option>)}
+        </Select>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
           <option value="site">{t("sight")}</option>
           <option value="restaurant">{t("restaurant")}</option>
@@ -3639,7 +3665,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
   const [editFormError,setEditFormError]=useState("");
   const [expandedCurrencies,setExpandedCurrencies]=useState<Record<string, boolean>>({});
   const [expandedExpenses,setExpandedExpenses]=useState<Record<string, boolean>>({});
-  const [dayFilter,setDayFilter]=useState("all");
+  const [dateFilter,setDateFilter]=useState("all");
   const [categoryFilter,setCategoryFilter]=useState("all");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
@@ -3652,20 +3678,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     return acc;
   },{});
   const categoryFilters=[...new Set(trip.expenses.map(exp=>exp.category).filter(Boolean))];
-  const getTripDay=(dateStr:string)=>{
-    if(!dateStr || !trip.startDate) return null;
-    const start = new Date(trip.startDate);
-    const expenseDate = new Date(dateStr);
-    if(Number.isNaN(start.getTime()) || Number.isNaN(expenseDate.getTime())) return null;
-    start.setHours(0,0,0,0);
-    expenseDate.setHours(0,0,0,0);
-    const diff=Math.floor((expenseDate.getTime()-start.getTime())/86400000)+1;
-    return diff>0 ? diff : null;
-  };
+  const expenseDateFilters=[...new Set(trip.expenses.map(exp=>toDateKey(exp.date)).filter(Boolean))].sort();
   const filteredExpenses = trip.expenses.filter(exp=>{
-    const dayMatch = dayFilter==="all" ? true : getTripDay(exp.date)===Number(dayFilter);
+    const dateMatch = dateFilter==="all" ? true : toDateKey(exp.date)===dateFilter;
     const catMatch = categoryFilter==="all" ? true : exp.category===categoryFilter;
-    return dayMatch && catMatch;
+    return dateMatch && catMatch;
   });
   const visibleExpenseCurrencies=[...new Set(filteredExpenses.map(exp=>exp.currency || "USD"))];
   const toggleCurrency=(currency:string)=>setExpandedCurrencies(curr=>({...curr,[currency]:!(curr[currency] ?? true)}));
@@ -3791,9 +3808,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         </Card>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-          <Select th={th} label={`${t("day")} Filter`} value={dayFilter} onChange={e=>setDayFilter(e.target.value)}>
-            <option value="all">All {t("day")}</option>
-            {Array.from({length:trip.duration},(_,i)=>i+1).map(day=><option key={`exp-day-${day}`} value={day}>{t("day")} {day}</option>)}
+          <Select th={th} label={`${t("date")} Filter`} value={dateFilter} onChange={e=>setDateFilter(e.target.value)}>
+            <option value="all">All {t("date")}</option>
+            {expenseDateFilters.map(date=><option key={`exp-date-${date}`} value={date}>{fmtDateWithWeekday(date)}</option>)}
           </Select>
           <Select th={th} label={`${t("category")} Filter`} value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
             <option value="all">All {t("category")}</option>
