@@ -273,7 +273,8 @@ const tripCode = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
 const localeFromTranslator = (t?:(k:TKey)=>string)=>t && t("day") === "日" ? "zh-HK" : "en-US";
-const fmtDate = (v:string, t?:(k:TKey)=>string)=>v ? new Date(v).toLocaleDateString(localeFromTranslator(t),{month:"short",day:"numeric",year:"numeric"}) : "—";
+const isChineseTranslator = (t?:(k:TKey)=>string)=>localeFromTranslator(t)==="zh-HK";
+const fmtDate = (v:string, t?:(k:TKey)=>string)=>v ? new Date(v).toLocaleDateString(localeFromTranslator(t),isChineseTranslator(t)?{month:"long",day:"numeric"}:{month:"short",day:"numeric",year:"numeric"}) : "—";
 const tripDateForDay = (startDate:string, day:number)=>{
   if(!startDate || !Number.isFinite(day)) return null;
   const date = new Date(startDate);
@@ -285,6 +286,11 @@ const fmtDateWithWeekday = (v:string, t?:(k:TKey)=>string)=>{
   if(!v) return "—";
   const date = new Date(v);
   if(Number.isNaN(date.getTime())) return v;
+  if(isChineseTranslator(t)){
+    const monthDay = date.toLocaleDateString("zh-HK",{month:"long",day:"numeric"});
+    const weekday = date.toLocaleDateString("zh-HK",{weekday:"narrow"});
+    return `${monthDay}(${weekday})`;
+  }
   return date.toLocaleDateString(localeFromTranslator(t),{weekday:"short",month:"short",day:"numeric",year:"numeric"});
 };
 const fmtTripDayDate = (startDate:string, day:number, t?:(k:TKey)=>string)=>{
@@ -301,7 +307,7 @@ const fmtDateTime = (v:string, t?:(k:TKey)=>string)=>{
   if(!v) return "—";
   const date = new Date(v);
   if(Number.isNaN(date.getTime())) return v;
-  return date.toLocaleString(localeFromTranslator(t),{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"});
+  return date.toLocaleString(localeFromTranslator(t),isChineseTranslator(t)?{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"}:{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"});
 };
 const sortFlightLegsByStartDate=(legs:FlightLeg[])=>[...legs].sort((a,b)=>
   (a.departureTime || a.arrivalTime || "9999-12-31").localeCompare(b.departureTime || b.arrivalTime || "9999-12-31")
