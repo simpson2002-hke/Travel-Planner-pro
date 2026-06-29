@@ -115,7 +115,7 @@ const en = {
   autoGenerate: "Auto-Generate Itinerary",
 
   addExpense: "Add Expense", amount: "Amount", currency: "Currency",
-  category: "Category", paidBy: "Paid By", splitWith: "Split With",
+  category: "Category", paidBy: "Paid By", paymentMethod: "Payment Method", paymentMethodCash: "Cash", paymentMethodCreditCard: "Credit Card", paymentMethodOthers: "Others", paymentMethodOther: "Specify payment method", paymentMethodOtherRequired: "Please specify the payment method.", customSplitRequired: "Enter each person's custom amount before continuing.", splitWith: "Split With",
   date: "Date", expNotes: "Notes",
   noExpenses: "No expenses recorded",
   noExpensesDesc: "Start tracking your trip spending.",
@@ -378,7 +378,7 @@ const zh: typeof en = {
   autoGenerate: "自動產生行程",
 
   addExpense: "新增開支", amount: "金額", currency: "貨幣",
-  category: "類別", paidBy: "付款人", splitWith: "分攤對象",
+  category: "類別", paidBy: "付款人", paymentMethod: "付款方式", paymentMethodCash: "現金", paymentMethodCreditCard: "信用卡", paymentMethodOthers: "其他", paymentMethodOther: "請註明付款方式", paymentMethodOtherRequired: "請註明付款方式。", customSplitRequired: "請先輸入每位成員的自訂金額。", splitWith: "分攤對象",
   date: "日期", expNotes: "備註",
   noExpenses: "尚無開支記錄",
   noExpensesDesc: "開始追蹤旅行花費。",
