@@ -34,6 +34,8 @@ type Expense = {
   category: string; paidBy: string; participants: string[]; notes: string;
   splitType?: "equal" | "custom";
   customSplits?: Record<string, number>;
+  paymentMethod?: "cash" | "credit_card" | "others";
+  paymentMethodOther?: string;
 };
 
 type PackingItem = {
@@ -143,6 +145,8 @@ type SharedPersistMeta = {
    ═══════════════════════════════════════════════════════════════════════════════ */
 const CURRENCIES = ["USD","EUR","GBP","JPY","HKD","SGD","AUD","CNY","TWD","KRW","THB","MYR","CAD","CHF"];
 const EXPENSE_CATS = ["Food","Transport","Accommodation","Activities","Shopping","Other"];
+const PAYMENT_METHODS = ["cash","credit_card","others"] as const;
+type PaymentMethod = typeof PAYMENT_METHODS[number];
 const EXPENSE_CAT_LABEL_KEY: Record<string, TKey> = {
   Food: "expenseCatFood",
   Transport: "expenseCatTransport",
@@ -152,6 +156,7 @@ const EXPENSE_CAT_LABEL_KEY: Record<string, TKey> = {
   Other: "expenseCatOther",
 };
 const expenseCategoryLabel = (category:string,t:(k:TKey)=>string)=>EXPENSE_CAT_LABEL_KEY[category] ? t(EXPENSE_CAT_LABEL_KEY[category]) : category;
+const paymentMethodLabel = (method:string,t:(k:TKey)=>string)=>method==="cash"?t("paymentMethodCash"):method==="credit_card"?t("paymentMethodCreditCard"):method==="others"?t("paymentMethodOthers"):method;
 const weatherCodeMap: Record<number,string> = {
   0:"Clear sky",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",
   45:"Fog",48:"Rime fog",51:"Light drizzle",53:"Drizzle",55:"Dense drizzle",
@@ -268,6 +273,29 @@ const tripCode = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
 const fmtDate = (v:string)=>v ? new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
+const tripDateForDay = (startDate:string, day:number)=>{
+  if(!startDate || !Number.isFinite(day)) return null;
+  const date = new Date(startDate);
+  if(Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate()+day-1);
+  return date;
+};
+const fmtDateWithWeekday = (v:string)=>{
+  if(!v) return "—";
+  const date = new Date(v);
+  if(Number.isNaN(date.getTime())) return v;
+  return date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+};
+const fmtTripDayDate = (startDate:string, day:number)=>{
+  const date = tripDateForDay(startDate, day);
+  return date ? fmtDateWithWeekday(date.toISOString()) : `${day}`;
+};
+const toDateKey = (v:string)=>{
+  if(!v) return "";
+  const date = new Date(v);
+  if(Number.isNaN(date.getTime())) return v.slice(0,10);
+  return date.toISOString().slice(0,10);
+};
 const fmtDateTime = (v:string)=>{
   if(!v) return "—";
   const date = new Date(v);
@@ -964,6 +992,8 @@ function normTrip(i:unknown):Trip{
       notes: expense.notes ?? "",
       splitType: expense.splitType === "custom" ? "custom" : "equal",
       customSplits: expense.customSplits && typeof expense.customSplits === "object" ? expense.customSplits : {},
+      paymentMethod: PAYMENT_METHODS.includes(expense.paymentMethod as PaymentMethod) ? expense.paymentMethod as PaymentMethod : "cash",
+      paymentMethodOther: expense.paymentMethodOther ?? "",
     })):[],
     itineraryChecklists,
     packingList:Array.isArray(t.packingList)?t.packingList.map((item,index)=>({
@@ -1238,7 +1268,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     ${sectionSet.has("itinerary") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("itinerary"))}</h2>
       ${itineraryByDay.map(({day, items, optionalStops})=>`<div class="day">
-        <h3>${escapeHtml(t("day"))} ${day}</h3>
+        <h3>${escapeHtml(fmtTripDayDate(trip.startDate, day))}</h3>
         ${items.length ? items.map(item=>`<div class="card">
           <div class="row">
             <div>
@@ -2714,11 +2744,25 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                 <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("members")}</p>
                 <p className="mt-2 text-3xl font-bold">{memberProfiles.length}</p>
               </div>
-              <div className={cx("rounded-3xl p-5 min-w-0 overflow-hidden",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
-                <p className={cx("text-sm",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightDetails")}</p>
-                <div className="mt-2 space-y-1 text-sm font-semibold leading-6 sm:text-base">
-                  {flightOverviewLines.length ? flightOverviewLines.map((line,index)=><p key={index} className="break-words">{line}</p>) : <p>—</p>}
+              <div className={cx("rounded-3xl p-5 min-w-0 overflow-hidden",th==="dark"?"bg-gradient-to-br from-cyan-400/10 to-blue-500/5":"bg-gradient-to-br from-blue-50 to-cyan-50")}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-200":"text-blue-700")}>{t("flightDetails")}</p>
+                  <span className={cx("rounded-full px-2.5 py-1 text-xs font-bold",th==="dark"?"bg-cyan-400/15 text-cyan-200":"bg-white text-blue-700")}>{flightLegs.length || 0}</span>
                 </div>
+                {flightLegs.length ? <div className="mt-3 space-y-3">
+                  {flightLegs.slice(0,2).map((leg,index)=><div key={leg.id} className={cx("rounded-2xl border p-3",th==="dark"?"border-white/10 bg-slate-950/20":"border-blue-100 bg-white/80")}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-bold break-words">{[leg.airline, leg.flightNumber].filter(Boolean).join(" ") || `${t("flightDetails")} ${index+1}`}</p>
+                      <span className={cx("shrink-0 text-xs font-semibold",th==="dark"?"text-slate-400":"text-slate-500")}>#{index+1}</span>
+                    </div>
+                    <p className={cx("mt-2 text-lg font-black",th==="dark"?"text-white":"text-slate-900")}>{leg.departureAirport || "—"} <span className={th==="dark"?"text-cyan-300":"text-blue-600"}>→</span> {leg.arrivalAirport || "—"}</p>
+                    <div className={cx("mt-2 grid gap-1 text-xs",th==="dark"?"text-slate-300":"text-slate-600")}>
+                      <span>{t("departureTime")}: {leg.departureTime ? fmtDateTime(leg.departureTime) : "—"}</span>
+                      <span>{t("arrivalTime")}: {leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"}</span>
+                    </div>
+                  </div>)}
+                  {flightLegs.length>2&&<p className={cx("text-xs font-semibold",th==="dark"?"text-cyan-200":"text-blue-700")}>+ {flightLegs.length-2} more</p>}
+                </div> : <p className="mt-2 text-lg font-semibold">—</p>}
               </div>
             </div>
           </div>
@@ -2983,10 +3027,14 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
   };
 
   const memberStats=members.map(member=>{
-    const paid=trip.expenses.filter(exp=>exp.paidBy===member.id).reduce((sum,exp)=>sum+exp.amount,0);
+    const paidByCurrency=trip.expenses.filter(exp=>exp.paidBy===member.id).reduce<Record<string, number>>((acc,exp)=>{
+      const currency=exp.currency || "USD";
+      acc[currency]=(acc[currency] ?? 0)+exp.amount;
+      return acc;
+    },{});
     const expenseTouches=trip.expenses.filter(exp=>(exp.participants ?? []).includes(member.id) || exp.paidBy===member.id).length;
     const role=getTripRole(trip,member.id);
-    return {member,paid,expenseTouches,role};
+    return {member,paidByCurrency,expenseTouches,role};
   });
   const myBalance=settlements(trip,profiles).bal.find(item=>item.id===user.id)?.net ?? 0;
   useEffect(()=>{
@@ -3055,7 +3103,7 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
     </Card>
 
     <div className="grid xl:grid-cols-2 gap-5">
-      {visibleMemberStats.map(({member,paid,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
+      {visibleMemberStats.map(({member,paidByCurrency,expenseTouches,role})=><Card key={member.id} th={th} className="p-7 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
             <Avatar name={dn(member)} icon={member.icon} iconImage={member.iconImage} th={th}/>
@@ -3083,7 +3131,9 @@ function TripTravelers({trip,user,profiles,th,t,onUpdateTrip}:{trip:Trip;user:Pr
         <div className="grid sm:grid-cols-2 gap-2">
           <div className={cx("rounded-2xl p-3",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
             <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("totalPaid")}</p>
-            <p className="mt-1 font-semibold">{fmtCur(paid)}</p>
+            <div className="mt-1 space-y-1">
+              {Object.keys(paidByCurrency).length ? Object.entries(paidByCurrency).map(([currency,total])=><p key={currency} className="font-semibold">{fmtCur(total,currency)}</p>) : <p className="font-semibold">{fmtCur(0)}</p>}
+            </div>
           </div>
           <div className={cx("rounded-2xl p-3",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}>
             <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("expenses")}</p>
@@ -3164,6 +3214,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
   const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
+  const dayLabel = (dayNumber:number)=>fmtTripDayDate(trip.startDate, dayNumber);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
     : canEdit;
@@ -3238,7 +3289,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const swapDaySchedule=(targetDay:number)=>{
     if(!canEdit || trip.duration < 2) return;
     if(!Number.isInteger(targetDay) || targetDay < 1 || targetDay > trip.duration || targetDay===day){
-      window.alert(`Please enter a valid day number between 1 and ${trip.duration}, excluding Day ${day}.`);
+      window.alert(`Please choose a valid date, excluding ${dayLabel(day)}.`);
       return;
     }
     const next = trip.itinerary.map(item=>{
@@ -3382,20 +3433,20 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     }
   },[day,swapTargetDay,trip.duration]);
 
-  return <div className="grid min-w-0 gap-6 lg:grid-cols-[1.45fr_.95fr]">
+  return <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
     <div className="space-y-5">
       <Card th={th} className="p-5 space-y-4">
         <div className="grid sm:grid-cols-4 gap-3">
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-2xl font-bold">{day}/{trip.duration}</p></div>
+          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{trip.optionalStops.length}</p></div>
         </div>
       </Card>
 
       <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
-        <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-2">
-          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{t("day")} {d}</button>)}
+        <div className="mb-4 -mx-1 flex min-w-0 items-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin]">
+          {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("flex-none rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -3408,7 +3459,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
             </Select>
           </div>
           <div className="space-y-2 text-sm">
-            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("noTravelerActivities").replace("{day}",String(day))}</p>
+            {splitTimeline.length===0?<p className={cx(th==="dark"?"text-slate-400":"text-slate-500")}>{t("noTravelerActivities").replace("{day}",dayLabel(day))}</p>
               :splitTimeline.map(entry=><p key={`it-${entry.item.id}`} className="break-words">🗓️ {entry.item.startTime} {entry.item.title}</p>)}
           </div>
         </div>
@@ -3462,24 +3513,24 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
     </div>
 
-    <Card th={th} className="p-6 h-fit lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] flex flex-col">
-      <div className={cx("mb-4 rounded-2xl border p-3 sm:p-4",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
-        <p className="text-sm font-semibold">🔁 {t("swapThisDayItinerary")}</p>
+    <Card th={th} className="p-5 sm:p-6 h-fit xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] flex flex-col min-w-0">
+      <div className={cx("mb-4 w-full rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+        <p className="text-base font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
-          {t("swapItineraryHelp").replace("{day}",String(day))}
+          {t("swapItineraryHelp").replace("{day}",dayLabel(day))}
         </p>
-        <div className="mt-3 flex flex-col gap-2">
-          <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))}>
+        <div className="mt-4 grid gap-3">
+          <Select th={th} label={t("swapWith")} value={String(swapTargetDay)} onChange={e=>setSwapTargetDay(Number(e.target.value))} className="w-full">
             {Array.from({length:trip.duration},(_,i)=>i+1)
               .filter(d=>d!==day)
-              .map(d=><option key={`swap-sidebar-${d}`} value={d}>{t("day")} {d}</option>)}
+              .map(d=><option key={`swap-sidebar-${d}`} value={d}>{dayLabel(d)}</option>)}
           </Select>
           <button
             onClick={()=>swapDaySchedule(swapTargetDay)}
             disabled={!canEdit || trip.duration < 2 || swapTargetDay===day}
-            className={cx("rounded-xl px-3 py-2 text-sm font-medium border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
+            className={cx("w-full rounded-2xl px-4 py-3 text-sm font-semibold border transition",th==="dark"?"border-white/15 bg-white/5 text-slate-200 hover:bg-white/10":"border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200","disabled:opacity-40 disabled:cursor-not-allowed")}
           >
-            {t("swapDayButton").replace("{dayA}",String(day)).replace("{dayB}",String(swapTargetDay))}
+            {t("swapDayButton").replace("{dayA}",dayLabel(day)).replace("{dayB}",dayLabel(swapTargetDay))}
           </button>
         </div>
       </div>
@@ -3581,7 +3632,9 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         </div>
       </form> : <form onSubmit={saveOptionalStop} className="space-y-3 flex flex-col min-h-0">
         <div className="space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-        <Input th={th} label={t("day")} type="number" min={1} max={trip.duration} value={optionalForm.day} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}/>
+        <Select th={th} label={t("date")} value={String(optionalForm.day)} onChange={e=>setOptionalForm(f=>({...f,day:Number(e.target.value)||1}))}>
+          {Array.from({length:trip.duration},(_,i)=>i+1).map(dayNumber=><option key={`optional-day-${dayNumber}`} value={dayNumber}>{dayLabel(dayNumber)}</option>)}
+        </Select>
         <Select th={th} label={t("placeType")} value={optionalForm.type} onChange={e=>setOptionalForm(f=>({...f,type:e.target.value as OptionalStop["type"]}))}>
           <option value="site">{t("sight")}</option>
           <option value="restaurant">{t("restaurant")}</option>
@@ -3604,15 +3657,15 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 }
 
 function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onRemove}:{trip:Trip;user:Profile;canEdit:boolean;profiles:Profile[];th:ThemeMode;t:(k:TKey)=>string;onAdd:(tid:string,e:Omit<Expense,"id">)=>void;onUpdateExpense:(tid:string,eid:string,e:Omit<Expense,"id">)=>void;onRemove:(tid:string,eid:string)=>void}){
-  const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
+  const [form,setForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, string>,paymentMethod:"cash" as PaymentMethod,paymentMethodOther:""});
   const [showForm,setShowForm]=useState(false);
   const [editingExpenseId,setEditingExpenseId]=useState<string|null>(null);
-  const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, number>});
+  const [editForm,setEditForm]=useState({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[] as string[],notes:"",splitType:"equal" as "equal"|"custom",customSplits:{} as Record<string, string>,paymentMethod:"cash" as PaymentMethod,paymentMethodOther:""});
   const [formError,setFormError]=useState("");
   const [editFormError,setEditFormError]=useState("");
   const [expandedCurrencies,setExpandedCurrencies]=useState<Record<string, boolean>>({});
   const [expandedExpenses,setExpandedExpenses]=useState<Record<string, boolean>>({});
-  const [dayFilter,setDayFilter]=useState("all");
+  const [dateFilter,setDateFilter]=useState("all");
   const [categoryFilter,setCategoryFilter]=useState("all");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
@@ -3625,20 +3678,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     return acc;
   },{});
   const categoryFilters=[...new Set(trip.expenses.map(exp=>exp.category).filter(Boolean))];
-  const getTripDay=(dateStr:string)=>{
-    if(!dateStr || !trip.startDate) return null;
-    const start = new Date(trip.startDate);
-    const expenseDate = new Date(dateStr);
-    if(Number.isNaN(start.getTime()) || Number.isNaN(expenseDate.getTime())) return null;
-    start.setHours(0,0,0,0);
-    expenseDate.setHours(0,0,0,0);
-    const diff=Math.floor((expenseDate.getTime()-start.getTime())/86400000)+1;
-    return diff>0 ? diff : null;
-  };
+  const expenseDateFilters=[...new Set(trip.expenses.map(exp=>toDateKey(exp.date)).filter(Boolean))].sort();
   const filteredExpenses = trip.expenses.filter(exp=>{
-    const dayMatch = dayFilter==="all" ? true : getTripDay(exp.date)===Number(dayFilter);
+    const dateMatch = dateFilter==="all" ? true : toDateKey(exp.date)===dateFilter;
     const catMatch = categoryFilter==="all" ? true : exp.category===categoryFilter;
-    return dayMatch && catMatch;
+    return dateMatch && catMatch;
   });
   const visibleExpenseCurrencies=[...new Set(filteredExpenses.map(exp=>exp.currency || "USD"))];
   const toggleCurrency=(currency:string)=>setExpandedCurrencies(curr=>({...curr,[currency]:!(curr[currency] ?? true)}));
@@ -3658,7 +3702,17 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     if(!canEdit) return;
     if(!form.title.trim()||form.amount<=0)return;
     const included = form.participants.length?form.participants:members.map(m=>m.id);
-    const payload = {...form,participants:included,customSplits:form.splitType==="custom"?form.customSplits:{}};
+    const missingCustom = form.splitType==="custom" && included.some(pid=>form.customSplits[pid] === undefined || form.customSplits[pid] === "");
+    if(missingCustom){
+      setFormError(t("customSplitRequired"));
+      return;
+    }
+    if(form.paymentMethod==="others" && !form.paymentMethodOther.trim()){
+      setFormError(t("paymentMethodOtherRequired"));
+      return;
+    }
+    const normalizedCustomSplits = Object.fromEntries(Object.entries(form.customSplits).map(([pid,value])=>[pid,Number(value)]));
+    const payload = {...form,paymentMethodOther:form.paymentMethod==="others"?form.paymentMethodOther.trim():"",participants:included,customSplits:form.splitType==="custom"?normalizedCustomSplits:{}};
     const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
     if(form.splitType==="custom" && Math.abs(customTotal-form.amount)>0.01){
       setFormError(`Custom split total (${fmtCur(customTotal,form.currency)}) must equal amount (${fmtCur(form.amount,form.currency)}).`);
@@ -3666,7 +3720,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     }
     setFormError("");
     onAdd(trip.id,payload);
-    setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:"",splitType:"equal",customSplits:{}});
+    setForm({date:new Date().toISOString().slice(0,10),title:"",amount:0,currency:"USD",category:"Food",paidBy:user.id,participants:[],notes:"",splitType:"equal",customSplits:{},paymentMethod:"cash",paymentMethodOther:""});
     setShowForm(false);
   };
 
@@ -3680,7 +3734,8 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     setEditForm({
       date:expense.date,title:expense.title,amount:expense.amount,currency:expense.currency,
       category:expense.category,paidBy:expense.paidBy,participants:[...expense.participants],notes:expense.notes,
-      splitType:expense.splitType==="custom"?"custom":"equal",customSplits:expense.customSplits ?? {},
+      splitType:expense.splitType==="custom"?"custom":"equal",customSplits:Object.fromEntries(Object.entries(expense.customSplits ?? {}).map(([pid,value])=>[pid,String(value)])),
+      paymentMethod:expense.paymentMethod ?? "cash",paymentMethodOther:expense.paymentMethodOther ?? "",
     });
   };
   const saveEdit=(e:React.FormEvent)=>{
@@ -3688,7 +3743,17 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     if(!editingExpenseId||!canEdit) return;
     if(!editForm.title.trim()||editForm.amount<=0)return;
     const included = editForm.participants.length?editForm.participants:members.map(m=>m.id);
-    const payload = {...editForm,participants:included,customSplits:editForm.splitType==="custom"?editForm.customSplits:{}};
+    const missingCustom = editForm.splitType==="custom" && included.some(pid=>editForm.customSplits[pid] === undefined || editForm.customSplits[pid] === "");
+    if(missingCustom){
+      setEditFormError(t("customSplitRequired"));
+      return;
+    }
+    if(editForm.paymentMethod==="others" && !editForm.paymentMethodOther.trim()){
+      setEditFormError(t("paymentMethodOtherRequired"));
+      return;
+    }
+    const normalizedCustomSplits = Object.fromEntries(Object.entries(editForm.customSplits).map(([pid,value])=>[pid,Number(value)]));
+    const payload = {...editForm,paymentMethodOther:editForm.paymentMethod==="others"?editForm.paymentMethodOther.trim():"",participants:included,customSplits:editForm.splitType==="custom"?normalizedCustomSplits:{}};
     const customTotal = included.reduce((sum,pid)=>sum + Number(payload.customSplits[pid] ?? 0),0);
     if(editForm.splitType==="custom" && Math.abs(customTotal-editForm.amount)>0.01){
       setEditFormError(`Custom split total (${fmtCur(customTotal,editForm.currency)}) must equal amount (${fmtCur(editForm.amount,editForm.currency)}).`);
@@ -3743,9 +3808,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         </Card>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-          <Select th={th} label={`${t("day")} Filter`} value={dayFilter} onChange={e=>setDayFilter(e.target.value)}>
-            <option value="all">All {t("day")}</option>
-            {Array.from({length:trip.duration},(_,i)=>i+1).map(day=><option key={`exp-day-${day}`} value={day}>{t("day")} {day}</option>)}
+          <Select th={th} label={`${t("date")} Filter`} value={dateFilter} onChange={e=>setDateFilter(e.target.value)}>
+            <option value="all">All {t("date")}</option>
+            {expenseDateFilters.map(date=><option key={`exp-date-${date}`} value={date}>{fmtDateWithWeekday(date)}</option>)}
           </Select>
           <Select th={th} label={`${t("category")} Filter`} value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}>
             <option value="all">All {t("category")}</option>
@@ -3782,7 +3847,7 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
                   </button>
                   {(expandedExpenses[exp.id] ?? true) && <>
                     <p className={cx("text-sm break-words",th==="dark"?"text-slate-400":"text-slate-500")}>
-                      {t("paidBy")}: {payer?dn(payer):t("unknown")} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
+                      {t("paidBy")}: {payer?dn(payer):t("unknown")} · {t("paymentMethod")}: {paymentMethodLabel(exp.paymentMethod ?? "cash",t)}{exp.paymentMethod==="others"&&exp.paymentMethodOther?` (${exp.paymentMethodOther})`:""} · {t("splitWith")}: {exp.participants.length||members.length} {t("members")}
                       {exp.participants.length>0&&<span className="ml-2">
                         ({exp.participants.map(pid=>members.find(m=>m.id===pid)).filter(Boolean).map(m=>dn(m!)).join(", ")})
                       </span>}
@@ -3818,7 +3883,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         <Select th={th} label={t("paidBy")} value={form.paidBy} onChange={e=>setForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
-        <Select th={th} label={t("splitMode")} value={form.splitType} onChange={e=>setForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+        <Select th={th} label={t("paymentMethod")} value={form.paymentMethod} onChange={e=>setForm(f=>({...f,paymentMethod:e.target.value as PaymentMethod,paymentMethodOther:e.target.value==="others"?f.paymentMethodOther:""}))}>
+          {PAYMENT_METHODS.map(method=><option key={method} value={method}>{paymentMethodLabel(method,t)}</option>)}
+        </Select>
+        {form.paymentMethod==="others"&&<Input th={th} label={t("paymentMethodOther")} value={form.paymentMethodOther} onChange={e=>setForm(f=>({...f,paymentMethodOther:e.target.value}))} required/>}
+        <Select th={th} label={t("splitMode")} value={form.splitType} onChange={e=>setForm(f=>({...f,splitType:e.target.value as "equal"|"custom",customSplits:e.target.value==="custom"?{}:f.customSplits}))}>
           <option value="equal">{t("splitModeEqual")}</option>
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
@@ -3850,8 +3919,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
             : <div className="mt-2 space-y-2">
               {(form.participants.length?form.participants:members.map(m=>m.id)).map(pid=>{
                 const member=members.find(m=>m.id===pid);
-                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={form.customSplits[pid] ?? 0}
-                  onChange={e=>setForm(f=>({...f,customSplits:{...f.customSplits,[pid]:Number(e.target.value||0)}}))}/>;
+                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={form.customSplits[pid] ?? ""}
+                  required
+                  onChange={e=>setForm(f=>({...f,customSplits:{...f.customSplits,[pid]:e.target.value}}))}/>;
               })}
             </div>}
         </div>
@@ -3876,7 +3946,11 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
         <Select th={th} label={t("paidBy")} value={editForm.paidBy} onChange={e=>setEditForm(f=>({...f,paidBy:e.target.value}))}>
           {members.map(m=><option key={m.id} value={m.id}>{dn(m)}</option>)}
         </Select>
-        <Select th={th} label={t("splitMode")} value={editForm.splitType} onChange={e=>setEditForm(f=>({...f,splitType:e.target.value as "equal"|"custom"}))}>
+        <Select th={th} label={t("paymentMethod")} value={editForm.paymentMethod} onChange={e=>setEditForm(f=>({...f,paymentMethod:e.target.value as PaymentMethod,paymentMethodOther:e.target.value==="others"?f.paymentMethodOther:""}))}>
+          {PAYMENT_METHODS.map(method=><option key={method} value={method}>{paymentMethodLabel(method,t)}</option>)}
+        </Select>
+        {editForm.paymentMethod==="others"&&<Input th={th} label={t("paymentMethodOther")} value={editForm.paymentMethodOther} onChange={e=>setEditForm(f=>({...f,paymentMethodOther:e.target.value}))} required/>}
+        <Select th={th} label={t("splitMode")} value={editForm.splitType} onChange={e=>setEditForm(f=>({...f,splitType:e.target.value as "equal"|"custom",customSplits:e.target.value==="custom"?{}:f.customSplits}))}>
           <option value="equal">{t("splitModeEqual")}</option>
           <option value="custom">{t("splitModeCustom")}</option>
         </Select>
@@ -3908,8 +3982,9 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
             : <div className="mt-2 space-y-2">
               {(editForm.participants.length?editForm.participants:members.map(m=>m.id)).map(pid=>{
                 const member=members.find(m=>m.id===pid);
-                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={editForm.customSplits[pid] ?? 0}
-                  onChange={e=>setEditForm(f=>({...f,customSplits:{...f.customSplits,[pid]:Number(e.target.value||0)}}))}/>;
+                return <Input key={pid} th={th} label={member?dn(member):pid} type="number" step="0.01" value={editForm.customSplits[pid] ?? ""}
+                  required
+                  onChange={e=>setEditForm(f=>({...f,customSplits:{...f.customSplits,[pid]:e.target.value}}))}/>;
               })}
             </div>}
         </div>
