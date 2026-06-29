@@ -272,7 +272,9 @@ const uid = (p:string)=>`${p}-${Math.random().toString(36).slice(2,10)}`;
 const tripCode = ()=>Math.random().toString(36).slice(2,8).toUpperCase();
 const cx = (...v:(string|false|null|undefined)[])=>v.filter(Boolean).join(" ");
 const dn = (p:Pick<Profile,"firstName"|"lastName">)=>`${p.firstName} ${p.lastName}`.trim();
-const fmtDate = (v:string)=>v ? new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—";
+const localeFromTranslator = (t?:(k:TKey)=>string)=>t && t("day") === "日" ? "zh-HK" : "en-US";
+const isChineseTranslator = (t?:(k:TKey)=>string)=>localeFromTranslator(t)==="zh-HK";
+const fmtDate = (v:string, t?:(k:TKey)=>string)=>v ? new Date(v).toLocaleDateString(localeFromTranslator(t),isChineseTranslator(t)?{month:"long",day:"numeric"}:{month:"short",day:"numeric",year:"numeric"}) : "—";
 const tripDateForDay = (startDate:string, day:number)=>{
   if(!startDate || !Number.isFinite(day)) return null;
   const date = new Date(startDate);
@@ -280,15 +282,20 @@ const tripDateForDay = (startDate:string, day:number)=>{
   date.setDate(date.getDate()+day-1);
   return date;
 };
-const fmtDateWithWeekday = (v:string)=>{
+const fmtDateWithWeekday = (v:string, t?:(k:TKey)=>string)=>{
   if(!v) return "—";
   const date = new Date(v);
   if(Number.isNaN(date.getTime())) return v;
-  return date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+  if(isChineseTranslator(t)){
+    const monthDay = date.toLocaleDateString("zh-HK",{month:"long",day:"numeric"});
+    const weekday = date.toLocaleDateString("zh-HK",{weekday:"narrow"});
+    return `${monthDay}(${weekday})`;
+  }
+  return date.toLocaleDateString(localeFromTranslator(t),{weekday:"short",month:"short",day:"numeric",year:"numeric"});
 };
-const fmtTripDayDate = (startDate:string, day:number)=>{
+const fmtTripDayDate = (startDate:string, day:number, t?:(k:TKey)=>string)=>{
   const date = tripDateForDay(startDate, day);
-  return date ? fmtDateWithWeekday(date.toISOString()) : `${day}`;
+  return date ? fmtDateWithWeekday(date.toISOString(), t) : `${day}`;
 };
 const toDateKey = (v:string)=>{
   if(!v) return "";
@@ -296,12 +303,20 @@ const toDateKey = (v:string)=>{
   if(Number.isNaN(date.getTime())) return v.slice(0,10);
   return date.toISOString().slice(0,10);
 };
-const fmtDateTime = (v:string)=>{
+const fmtDateTime = (v:string, t?:(k:TKey)=>string)=>{
   if(!v) return "—";
   const date = new Date(v);
   if(Number.isNaN(date.getTime())) return v;
-  return date.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"});
+  return date.toLocaleString(localeFromTranslator(t),isChineseTranslator(t)?{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"}:{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"});
 };
+const sortFlightLegsByStartDate=(legs:FlightLeg[])=>[...legs].sort((a,b)=>
+  (a.departureTime || a.arrivalTime || "9999-12-31").localeCompare(b.departureTime || b.arrivalTime || "9999-12-31")
+  || (a.arrivalTime || "9999-12-31").localeCompare(b.arrivalTime || "9999-12-31")
+  || a.id.localeCompare(b.id));
+const sortHotelsByStartDate=(hotels:HotelStay[])=>[...hotels].sort((a,b)=>
+  (a.checkIn || a.checkOut || "9999-12-31").localeCompare(b.checkIn || b.checkOut || "9999-12-31")
+  || (a.checkOut || "9999-12-31").localeCompare(b.checkOut || "9999-12-31")
+  || a.id.localeCompare(b.id));
 const fmtCur = (n:number,c="USD")=>new Intl.NumberFormat("en-US",{style:"currency",currency:c,maximumFractionDigits:2}).format(n);
 const upper = (v:string)=>v.trim().toUpperCase();
 const normalizeName = (v:string)=>upper(v);
@@ -1221,7 +1236,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     ${sectionSet.has("flights") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("flightLegs"))}</h2>
       <div class="card-grid">
-      ${trip.flightLegs.length ? trip.flightLegs.map((leg,index)=>`<div class="card">
+      ${trip.flightLegs.length ? sortFlightLegsByStartDate(trip.flightLegs).map((leg,index)=>`<div class="card">
         <div class="row">
           <div>
             <div class="label">${escapeHtml(t("flightDetails"))} ${index+1}</div>
@@ -1244,7 +1259,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     ${sectionSet.has("hotels") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("hotelStays"))}</h2>
       <div class="card-grid">
-      ${trip.hotels.length ? trip.hotels.map((hotel,index)=>`<div class="card">
+      ${trip.hotels.length ? sortHotelsByStartDate(trip.hotels).map((hotel,index)=>`<div class="card">
         <div class="row">
           <div>
             <div class="label">${escapeHtml(t("hotelDetails"))} ${index+1}</div>
@@ -1268,7 +1283,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
     ${sectionSet.has("itinerary") ? `<section class="section">
       <h2 class="section-title">${escapeHtml(t("itinerary"))}</h2>
       ${itineraryByDay.map(({day, items, optionalStops})=>`<div class="day">
-        <h3>${escapeHtml(fmtTripDayDate(trip.startDate, day))}</h3>
+        <h3>${escapeHtml(fmtTripDayDate(trip.startDate, day, t))}</h3>
         ${items.length ? items.map(item=>`<div class="card">
           <div class="row">
             <div>
@@ -2590,7 +2605,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     exportTripToPdf(trip, memberProfiles, t, sections);
     setShowPdfModal(false);
   };
-  const flightLegs=trip.flightLegs.length>0?trip.flightLegs:[{
+  const flightLegs=trip.flightLegs.length>0?sortFlightLegsByStartDate(trip.flightLegs):[{
     id:"legacy-flight",airline:trip.airline,flightNumber:trip.flightNumber,departureAirport:trip.departureAirport,arrivalAirport:trip.arrivalAirport,
     departureTime:trip.departureTime,arrivalTime:trip.arrivalTime,terminal:trip.terminal,bookingReference:trip.bookingReference,notes:"",
   }].filter(leg=>Object.values(leg).some(Boolean));
@@ -2598,10 +2613,10 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
     ? flightLegs.map(leg=>[
         [leg.airline, leg.flightNumber].filter(Boolean).join(" ") || t("flightDetails"),
         leg.departureAirport && leg.arrivalAirport ? `${leg.departureAirport} → ${leg.arrivalAirport}` : "",
-        [leg.departureTime ? fmtDateTime(leg.departureTime) : "", leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : ""].filter(Boolean).join(" → "),
+        [leg.departureTime ? fmtDateTime(leg.departureTime, t) : "", leg.arrivalTime ? fmtDateTime(leg.arrivalTime, t) : ""].filter(Boolean).join(" → "),
       ].filter(Boolean).join(" · "))
     : [];
-  const hotels=trip.hotels.length>0?trip.hotels:[{
+  const hotels=trip.hotels.length>0?sortHotelsByStartDate(trip.hotels):[{
     id:"legacy-hotel",hotelName:trip.hotelName,hotelAddress:trip.hotelAddress,roomType:trip.roomType,checkIn:trip.checkIn,checkOut:trip.checkOut,confirmationCode:trip.confirmationCode,contact:"",notes:"",
   }].filter(stay=>Object.values(stay).some(Boolean));
   const status=getTripStatus(trip);
@@ -2757,8 +2772,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                     </div>
                     <p className={cx("mt-2 text-lg font-black",th==="dark"?"text-white":"text-slate-900")}>{leg.departureAirport || "—"} <span className={th==="dark"?"text-cyan-300":"text-blue-600"}>→</span> {leg.arrivalAirport || "—"}</p>
                     <div className={cx("mt-2 grid gap-1 text-xs",th==="dark"?"text-slate-300":"text-slate-600")}>
-                      <span>{t("departureTime")}: {leg.departureTime ? fmtDateTime(leg.departureTime) : "—"}</span>
-                      <span>{t("arrivalTime")}: {leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"}</span>
+                      <span>{t("departureTime")}: {leg.departureTime ? fmtDateTime(leg.departureTime, t) : "—"}</span>
+                      <span>{t("arrivalTime")}: {leg.arrivalTime ? fmtDateTime(leg.arrivalTime, t) : "—"}</span>
                     </div>
                   </div>)}
                   {flightLegs.length>2&&<p className={cx("text-xs font-semibold",th==="dark"?"text-cyan-200":"text-blue-700")}>+ {flightLegs.length-2} more</p>}
@@ -2817,8 +2832,8 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
               th={th}
             />
             <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              <InfoRow label={t("departureTime")} value={leg.departureTime ? fmtDateTime(leg.departureTime) : "—"} th={th}/>
-              <InfoRow label={t("arrivalTime")} value={leg.arrivalTime ? fmtDateTime(leg.arrivalTime) : "—"} th={th}/>
+              <InfoRow label={t("departureTime")} value={leg.departureTime ? fmtDateTime(leg.departureTime, t) : "—"} th={th}/>
+              <InfoRow label={t("arrivalTime")} value={leg.arrivalTime ? fmtDateTime(leg.arrivalTime, t) : "—"} th={th}/>
               <InfoRow label={t("terminal")} value={leg.terminal || "—"} th={th}/>
               <InfoRow label={t("bookingReference")} value={leg.bookingReference || "—"} th={th}/>
             </div>
@@ -3214,15 +3229,16 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
   const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
-  const dayLabel = (dayNumber:number)=>fmtTripDayDate(trip.startDate, dayNumber);
+  const dayLabel = (dayNumber:number)=>fmtTripDayDate(trip.startDate, dayNumber, t);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
     : canEdit;
 
   const dayItems=trip.itinerary.filter(it=>it.day===day).sort((a,b)=>a.order-b.order);
   const optionalDayItems=trip.optionalStops.filter(stop=>stop.day===day);
-  const totalItems=trip.itinerary.length;
-  const photoCount=trip.itinerary.filter(it=>Boolean(it.photo)).length;
+  const totalItems=dayItems.length;
+  const photoCount=dayItems.filter(it=>Boolean(it.photo)).length;
+  const optionalCount=optionalDayItems.length;
   const mediaClassBySize: Record<"small"|"medium"|"large", string> = {
     small: "h-28 sm:h-32",
     medium: "h-40 sm:h-48",
@@ -3440,7 +3456,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
           <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{trip.optionalStops.length}</p></div>
+          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{optionalCount}</p></div>
         </div>
       </Card>
 
@@ -4276,11 +4292,15 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
 
   const save=()=>{
     const shouldKeepCustom=Boolean(form.customLocation?.name?.trim()) && Number.isFinite(form.customLocation?.lat) && Number.isFinite(form.customLocation?.lon) && !(form.customLocation?.lat===0 && form.customLocation?.lon===0 && !form.customLocation?.name.trim());
-    const firstLeg=form.flightLegs[0];
-    const firstHotel=form.hotels[0];
-    const itineraryWithFlights=addFlightLegsToItinerary(form.itinerary,form.flightLegs,form.startDate);
+    const sortedFlightLegs=sortFlightLegsByStartDate(form.flightLegs);
+    const sortedHotels=sortHotelsByStartDate(form.hotels);
+    const firstLeg=sortedFlightLegs[0];
+    const firstHotel=sortedHotels[0];
+    const itineraryWithFlights=addFlightLegsToItinerary(form.itinerary,sortedFlightLegs,form.startDate);
     onUpdate(trip.id,{
       ...form,
+      flightLegs: sortedFlightLegs,
+      hotels: sortedHotels,
       itinerary: itineraryWithFlights,
       customLocation:shouldKeepCustom?form.customLocation:undefined,
       airline:firstLeg?.airline??"", flightNumber:firstLeg?.flightNumber??"", departureAirport:firstLeg?.departureAirport??"", arrivalAirport:firstLeg?.arrivalAirport??"",
@@ -4318,7 +4338,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   const updateLeg=(legId:string,patch:Partial<FlightLeg>)=>setForm(f=>({...f,flightLegs:f.flightLegs.map(leg=>leg.id===legId?{...leg,...patch}:leg)}));
   const addLeg=()=>{
     const leg={id:uid("flt"),airline:"",flightNumber:"",departureAirport:"",arrivalAirport:"",departureTime:"",arrivalTime:"",terminal:"",bookingReference:"",notes:""};
-    setForm(f=>({...f,flightLegs:[leg,...f.flightLegs]}));
+    setForm(f=>({...f,flightLegs:sortFlightLegsByStartDate([leg,...f.flightLegs])}));
     setExpandedFlightIds(ids=>[leg.id,...ids]);
   };
   const removeLeg=(legId:string)=>{
@@ -4328,7 +4348,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
   const updateHotel=(hotelId:string,patch:Partial<HotelStay>)=>setForm(f=>({...f,hotels:f.hotels.map(hotel=>hotel.id===hotelId?{...hotel,...patch}:hotel)}));
   const addHotel=()=>{
     const nextHotel={id:uid("htl"),hotelName:"",hotelAddress:"",roomType:"",checkIn:"",checkOut:"",confirmationCode:"",contact:"",notes:""};
-    setForm(f=>({...f,hotels:[nextHotel,...f.hotels]}));
+    setForm(f=>({...f,hotels:sortHotelsByStartDate([nextHotel,...f.hotels])}));
     setExpandedHotelIds(ids=>[nextHotel.id,...ids]);
   };
   const removeHotel=(hotelId:string)=>{
@@ -4487,7 +4507,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
         <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("flightSearchByNumberHint")}</p>
         {flightMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{flightMessage}</p>}
         <div className="space-y-4">
-          {form.flightLegs.map((leg,index)=><details key={leg.id} open={expandedFlightIds.includes(leg.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          {sortFlightLegsByStartDate(form.flightLegs).map((leg,index)=><details key={leg.id} open={expandedFlightIds.includes(leg.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
               <div className="space-y-1">
                 <p className="font-semibold">{t("flightDetails")} {index+1}</p>
@@ -4527,7 +4547,7 @@ function TripSettings({trip,profiles,canEdit,isOwner,siteCfg,th,t,onUpdate,onDel
         <p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("hotelSearchHint")}</p>
         {hotelMessage&&<p className={cx("text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>{hotelMessage}</p>}
         <div className="space-y-4">
-          {form.hotels.map((hotel,index)=><details key={hotel.id} open={expandedHotelIds.includes(hotel.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
+          {sortHotelsByStartDate(form.hotels).map((hotel,index)=><details key={hotel.id} open={expandedHotelIds.includes(hotel.id)} className={cx("rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/8 bg-white/[0.03]":"border-slate-200 bg-slate-50")}>
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
               <div className="space-y-1">
                 <p className="font-semibold">{t("hotelDetails")} {index+1}</p>
