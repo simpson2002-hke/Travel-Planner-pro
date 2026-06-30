@@ -1098,6 +1098,15 @@ function normSite(i:unknown):SiteSettings{
   };
 }
 
+
+function expenseSplitParticipantIds(expense:Expense,fallbackIds:string[]){
+  if(expense.splitType!=="custom") return expense.participants.length?expense.participants:fallbackIds;
+  const customIds=Object.entries(expense.customSplits ?? {})
+    .filter(([,amount])=>Number.isFinite(Number(amount)))
+    .map(([pid])=>pid);
+  return [...new Set([...(expense.participants.length?expense.participants:fallbackIds),...customIds])];
+}
+
 function settlements(trip:Trip,profiles:Profile[],currency?:string){
   const mems=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const led=new Map<string,{name:string;paid:number;share:number}>();
@@ -1105,7 +1114,7 @@ function settlements(trip:Trip,profiles:Profile[],currency?:string){
   const expenses = currency ? trip.expenses.filter(exp=>exp.currency===currency) : trip.expenses;
   for(const e of expenses){
     const payer=led.get(e.paidBy); if(payer) payer.paid+=e.amount;
-    const inc=e.participants.length?e.participants:mems.map(m=>m.id);
+    const inc=expenseSplitParticipantIds(e,mems.map(m=>m.id));
     if(e.splitType==="custom" && e.customSplits){
       for(const pid of inc){
         const x=led.get(pid);
@@ -1117,10 +1126,28 @@ function settlements(trip:Trip,profiles:Profile[],currency?:string){
     }
   }
   const bal=[...led.entries()].map(([id,r])=>({id,name:r.name,paid:r.paid,share:r.share,net:+(r.paid-r.share).toFixed(2)}));
-  const cred=bal.filter(b=>b.net>0.01).map(b=>({...b})).sort((a,b)=>b.net-a.net);
-  const debt=bal.filter(b=>b.net<-0.01).map(b=>({...b,debt:Math.abs(b.net)})).sort((a,b)=>b.debt-a.debt);
-  const sett:{from:string;to:string;amount:number}[]=[];
-  for(const d of debt){let rem=d.debt;for(const c of cred){if(rem<=0.01||c.net<=0.01)continue;const a=Math.min(rem,c.net);sett.push({from:d.name,to:c.name,amount:+a.toFixed(2)});rem-=a;c.net-=a;}}
+  const settlementMap=new Map<string,{from:string;to:string;amount:number}>();
+  for(const e of expenses){
+    const payer=led.get(e.paidBy);
+    if(!payer) continue;
+    const inc=expenseSplitParticipantIds(e,mems.map(m=>m.id));
+    const addSettlement=(pid:string,amount:number)=>{
+      if(pid===e.paidBy || !Number.isFinite(amount) || amount<=0.01) return;
+      const debtor=led.get(pid);
+      if(!debtor) return;
+      const key=`${pid}->${e.paidBy}`;
+      const existing=settlementMap.get(key);
+      if(existing) existing.amount += amount;
+      else settlementMap.set(key,{from:debtor.name,to:payer.name,amount});
+    };
+    if(e.splitType==="custom" && e.customSplits){
+      for(const pid of inc) addSettlement(pid,Number(e.customSplits[pid] ?? 0));
+    }else{
+      const each=e.amount/(inc.length||1);
+      for(const pid of inc) addSettlement(pid,each);
+    }
+  }
+  const sett=[...settlementMap.values()].map(s=>({...s,amount:+s.amount.toFixed(2)})).filter(s=>s.amount>0.01);
   return {total:expenses.reduce((s,e)=>s+e.amount,0),bal,sett};
 }
 
