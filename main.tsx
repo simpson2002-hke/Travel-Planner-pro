@@ -1098,6 +1098,15 @@ function normSite(i:unknown):SiteSettings{
   };
 }
 
+
+function expenseSplitParticipantIds(expense:Expense,fallbackIds:string[]){
+  if(expense.splitType!=="custom") return expense.participants.length?expense.participants:fallbackIds;
+  const customIds=Object.entries(expense.customSplits ?? {})
+    .filter(([,amount])=>Number.isFinite(Number(amount)))
+    .map(([pid])=>pid);
+  return [...new Set([...(expense.participants.length?expense.participants:fallbackIds),...customIds])];
+}
+
 function settlements(trip:Trip,profiles:Profile[],currency?:string){
   const mems=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const led=new Map<string,{name:string;paid:number;share:number}>();
@@ -1105,7 +1114,7 @@ function settlements(trip:Trip,profiles:Profile[],currency?:string){
   const expenses = currency ? trip.expenses.filter(exp=>exp.currency===currency) : trip.expenses;
   for(const e of expenses){
     const payer=led.get(e.paidBy); if(payer) payer.paid+=e.amount;
-    const inc=e.participants.length?e.participants:mems.map(m=>m.id);
+    const inc=expenseSplitParticipantIds(e,mems.map(m=>m.id));
     if(e.splitType==="custom" && e.customSplits){
       for(const pid of inc){
         const x=led.get(pid);
@@ -1121,9 +1130,9 @@ function settlements(trip:Trip,profiles:Profile[],currency?:string){
   for(const e of expenses){
     const payer=led.get(e.paidBy);
     if(!payer) continue;
-    const inc=e.participants.length?e.participants:mems.map(m=>m.id);
+    const inc=expenseSplitParticipantIds(e,mems.map(m=>m.id));
     const addSettlement=(pid:string,amount:number)=>{
-      if(pid===e.paidBy || amount<=0.01) return;
+      if(pid===e.paidBy || !Number.isFinite(amount) || amount<=0.01) return;
       const debtor=led.get(pid);
       if(!debtor) return;
       const key=`${pid}->${e.paidBy}`;
