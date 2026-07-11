@@ -194,7 +194,7 @@ const defaultSiteSettings: SiteSettings = {
 const SK = {
   profiles:"tp-profiles", trips:"tp-trips", adminPw:"tp-admin-pw",
   adminAuth:"tp-admin-auth", userId:"tp-current-user", theme:"tp-theme",
-  site:"tp-site-settings", lang:"tp-lang",
+  site:"tp-site-settings", lang:"tp-lang", desktopLayout:"tp-desktop-layout",
 };
 
 const HERO_IMAGES = [
@@ -488,22 +488,29 @@ function usePersist<T>(key:string,init:T){
   return [s,set] as const;
 }
 
+function isDesktopLayoutForced(){
+  if(typeof document==="undefined") return false;
+  return document.documentElement.dataset.layoutMode==="desktop";
+}
+
 function usePortraitMobile(){
   const [isPortraitMobile,setIsPortraitMobile]=useState(()=>{
     if(typeof window==="undefined") return false;
-    return window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
+    return !isDesktopLayoutForced() && window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
   });
 
   useEffect(()=>{
     if(typeof window==="undefined") return;
     const mediaQuery=window.matchMedia("(max-width: 767px) and (orientation: portrait)");
-    const update=()=>setIsPortraitMobile(mediaQuery.matches);
+    const update=()=>setIsPortraitMobile(!isDesktopLayoutForced() && mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change",update);
     window.addEventListener("resize",update);
+    window.addEventListener("tp-layout-mode-change",update);
     return ()=>{
       mediaQuery.removeEventListener?.("change",update);
       window.removeEventListener("resize",update);
+      window.removeEventListener("tp-layout-mode-change",update);
     };
   },[]);
 
@@ -513,19 +520,21 @@ function usePortraitMobile(){
 function useMobileScreen(){
   const [isMobileScreen,setIsMobileScreen]=useState(()=>{
     if(typeof window==="undefined") return false;
-    return window.matchMedia("(max-width: 900px)").matches;
+    return !isDesktopLayoutForced() && window.matchMedia("(max-width: 900px)").matches;
   });
 
   useEffect(()=>{
     if(typeof window==="undefined") return;
     const mediaQuery=window.matchMedia("(max-width: 900px)");
-    const update=()=>setIsMobileScreen(mediaQuery.matches);
+    const update=()=>setIsMobileScreen(!isDesktopLayoutForced() && mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change",update);
     window.addEventListener("resize",update);
+    window.addEventListener("tp-layout-mode-change",update);
     return ()=>{
       mediaQuery.removeEventListener?.("change",update);
       window.removeEventListener("resize",update);
+      window.removeEventListener("tp-layout-mode-change",update);
     };
   },[]);
 
@@ -2179,8 +2188,9 @@ function Landing({siteName,desc,t,onIn,onUp}:{th:ThemeMode;siteName:string;desc:
 /* ═══════════════════════════════════════════════════════════════════════════════
    HEADER
    ═══════════════════════════════════════════════════════════════════════════════ */
-function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onSignIn,onSync,isSyncing}:{
+function Header({siteName,th,setTh,lang,setLang,desktopLayout,setDesktopLayout,user,view,setView,t,onLogout,onSignIn,onSync,isSyncing}:{
   siteName:string;th:ThemeMode;setTh:(v:ThemeMode)=>void;lang:Language;setLang:(v:Language)=>void;
+  desktopLayout:boolean;setDesktopLayout:(v:boolean)=>void;
   user?:Profile;view:ViewMode;setView:(v:ViewMode)=>void;t:(k:TKey)=>string;onLogout:()=>void;onSignIn:()=>void;
   onSync:()=>void;isSyncing:boolean;
 }){
@@ -2204,6 +2214,9 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
             th==="dark"?"bg-white/5 hover:bg-white/10":"bg-slate-100 hover:bg-slate-200")}>
           {th==="dark"?"☀️":"🌙"}
         </button>
+        <Btn th={th} v="ghost" sz="sm" onClick={()=>setDesktopLayout(!desktopLayout)} className="shrink-0" title={desktopLayout?"Use mobile layout":"Use desktop layout"}>
+          {desktopLayout ? "📱 Mobile" : "🖥️ Desktop"}
+        </Btn>
         <Btn th={th} v="ghost" sz="sm" onClick={onSync} disabled={isSyncing} className="shrink-0">
           {isSyncing ? "Syncing…" : "Sync now"}
         </Btn>
@@ -5162,6 +5175,7 @@ function AdminPasswordForm({th,t,onSave}:{th:ThemeMode;t:(k:TKey)=>string;onSave
 export function App(){
   const [theme,setTheme]=usePersist<ThemeMode>(SK.theme,"dark");
   const [lang,setLang]=usePersist<Language>(SK.lang,"en");
+  const [desktopLayout,setDesktopLayout]=usePersist<boolean>(SK.desktopLayout,false);
   const [profiles,setProfiles,profilesMeta]=useSharedPersist<Profile[]>(SK.profiles,[]);
   const [trips,setTrips,tripsMeta]=useSharedPersist<Trip[]>(SK.trips,[]);
   const [adminPw,setAdminPw,adminPwMeta]=useSharedPersist<string>(SK.adminPw,"");
@@ -5193,6 +5207,14 @@ export function App(){
     });
   },[setTrips,siteCfg,siteCfgMeta.hydrated,tripsMeta.hydrated]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
+  useEffect(()=>{
+    if(typeof document==="undefined") return;
+    const root=document.documentElement;
+    const viewport=document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    root.dataset.layoutMode=desktopLayout?"desktop":"responsive";
+    viewport?.setAttribute("content",desktopLayout?"width=1200, initial-scale=0.35":"width=device-width, initial-scale=1.0");
+    window.dispatchEvent(new Event("tp-layout-mode-change"));
+  },[desktopLayout]);
 
   const sharedSyncReady = profilesMeta.hydrated && tripsMeta.hydrated && adminPwMeta.hydrated && siteCfgMeta.hydrated;
   const sharedSyncErrors = [profilesMeta.lastError,tripsMeta.lastError,adminPwMeta.lastError,siteCfgMeta.lastError].filter(Boolean);
@@ -5402,6 +5424,7 @@ export function App(){
     </>}
 
     {!showLanding&&<Header siteName={siteCfg.siteName} th={theme} setTh={setTheme} lang={lang} setLang={setLang}
+      desktopLayout={desktopLayout} setDesktopLayout={setDesktopLayout}
       user={user} view={view} setView={setView} t={t}
       onLogout={()=>setUserId("")} onSignIn={()=>{setAuthMode("signin");setShowAuth(true);}}
       onSync={()=>{refreshSharedSync().catch(()=>{});}} isSyncing={manualSyncing}/>}
