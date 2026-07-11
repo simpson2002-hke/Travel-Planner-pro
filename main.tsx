@@ -3541,14 +3541,14 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     }
   },[day,swapTargetDay,trip.duration]);
 
-  return <div className={cx("grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]",isPortraitMobile&&"gap-4")}>
+  return <div className={cx("grid min-w-0 max-w-full gap-6 overflow-x-hidden xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]",isPortraitMobile&&"gap-4")}>
     <div className={cx("space-y-5",isPortraitMobile&&"space-y-4")}>
       <Card th={th} className={cx("space-y-4",isPortraitMobile?"p-3":"p-5")}>
         <div className={cx("grid gap-3 sm:grid-cols-4",isPortraitMobile&&"grid-cols-2 gap-2")}>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{optionalCount}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 break-words text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{optionalCount}</p></div>
         </div>
       </Card>
 
@@ -3556,9 +3556,9 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
         <Select th={th} label={t("date")} value={String(day)} onChange={e=>setDay(Number(e.target.value)||1)} className="mb-4 lg:hidden">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><option key={`day-jump-${d}`} value={d}>{dayLabel(d)}</option>)}
         </Select>
-        <div className="mb-4 -mx-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-scroll overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/60 [&::-webkit-scrollbar-track]:bg-transparent" aria-label={t("date")}>
+        {!isPortraitMobile&&<div className="mb-4 -mx-1 flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/60 [&::-webkit-scrollbar-track]:bg-transparent" aria-label={t("date")}>
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("flex-none rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
-        </div>
+        </div>}
         <div className={cx("mb-6 rounded-2xl",isPortraitMobile?"p-3":"p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold">{t("splitTimelineByTraveler")}</p>
