@@ -1192,6 +1192,62 @@ function settlements(trip:Trip,profiles:Profile[],currency?:string){
   return {total:expenses.reduce((s,e)=>s+e.amount,0),bal,sett};
 }
 
+type GeneralSettlementLine = {
+  from:string; to:string; amount:number; currency:string;
+  gross:number; offset:number; convertedAmount:number;
+};
+
+function netSettlementLinesByCurrency(settlementByCurrency:Record<string, ReturnType<typeof settlements>>, ratesToHkd:Record<string, number>){
+  const lines: GeneralSettlementLine[] = [];
+  for(const [currency,result] of Object.entries(settlementByCurrency)){
+    const pairMap = new Map<string,{a:string;b:string;aToB:number;bToA:number}>();
+    for(const settlement of result.sett){
+      const [a,b] = [settlement.from, settlement.to].sort((left,right)=>left.localeCompare(right));
+      const key = `${a}::${b}`;
+      const row = pairMap.get(key) ?? {a,b,aToB:0,bToA:0};
+      if(settlement.from===a && settlement.to===b) row.aToB += settlement.amount;
+      else row.bToA += settlement.amount;
+      pairMap.set(key,row);
+    }
+    for(const row of pairMap.values()){
+      const net = row.aToB - row.bToA;
+      if(Math.abs(net)<=0.01) continue;
+      const from = net>0 ? row.a : row.b;
+      const to = net>0 ? row.b : row.a;
+      const gross = net>0 ? row.aToB : row.bToA;
+      const offset = net>0 ? row.bToA : row.aToB;
+      const amount = Math.abs(net);
+      const rate = currency==="HKD" ? 1 : Number(ratesToHkd[currency] ?? 0);
+      lines.push({from,to,amount:+amount.toFixed(2),currency,gross:+gross.toFixed(2),offset:+offset.toFixed(2),convertedAmount:+(amount*rate).toFixed(2)});
+    }
+  }
+  return lines.sort((a,b)=>a.currency.localeCompare(b.currency)||a.from.localeCompare(b.from)||a.to.localeCompare(b.to));
+}
+
+function buildFinalHkdSettlementLines(lines:GeneralSettlementLine[]){
+  const pairMap = new Map<string,{a:string;b:string;aToB:number;bToA:number}>();
+  for(const line of lines){
+    if(line.convertedAmount<=0.01) continue;
+    const [a,b] = [line.from, line.to].sort((left,right)=>left.localeCompare(right));
+    const key = `${a}::${b}`;
+    const row = pairMap.get(key) ?? {a,b,aToB:0,bToA:0};
+    if(line.from===a && line.to===b) row.aToB += line.convertedAmount;
+    else row.bToA += line.convertedAmount;
+    pairMap.set(key,row);
+  }
+  return [...pairMap.values()].map(row=>{
+    const net = row.aToB - row.bToA;
+    if(Math.abs(net)<=0.01) return null;
+    return {
+      from: net>0 ? row.a : row.b,
+      to: net>0 ? row.b : row.a,
+      amount: +Math.abs(net).toFixed(2),
+      gross: +(net>0 ? row.aToB : row.bToA).toFixed(2),
+      offset: +(net>0 ? row.bToA : row.aToB).toFixed(2),
+    };
+  }).filter(Boolean).sort((a,b)=>a!.from.localeCompare(b!.from)||a!.to.localeCompare(b!.to)) as {from:string;to:string;amount:number;gross:number;offset:number}[];
+}
+
 function tripFlightSummary(trip:Trip){
   if (trip.flightLegs.length > 0) {
     const firstLeg = trip.flightLegs[0];
@@ -3778,10 +3834,14 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
   const [expandedExpenses,setExpandedExpenses]=useState<Record<string, boolean>>({});
   const [dateFilter,setDateFilter]=useState("all");
   const [categoryFilter,setCategoryFilter]=useState("all");
+  const [ratesToHkd,setRatesToHkd]=useState<Record<string, number>>({HKD:1});
+  const [rateStatus,setRateStatus]=useState("");
 
   const members=trip.members.map(id=>profiles.find(p=>p.id===id)).filter(Boolean) as Profile[];
   const expenseCurrencies=[...new Set(trip.expenses.map(exp=>exp.currency || "USD"))];
   const settlementByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlements(trip,profiles,currency)]));
+  const generalSettlementLines = netSettlementLinesByCurrency(settlementByCurrency,ratesToHkd);
+  const finalHkdSettlementLines = buildFinalHkdSettlementLines(generalSettlementLines);
   const myBalByCurrency = Object.fromEntries(expenseCurrencies.map(currency=>[currency,settlementByCurrency[currency].bal.find(b=>b.id===user.id)]));
   const totalsByCurrency = trip.expenses.reduce<Record<string, number>>((acc,expense)=>{
     const cur = expense.currency || "USD";
@@ -3803,6 +3863,37 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
     acc[cur] = (acc[cur] ?? 0) + expense.amount;
     return acc;
   },{});
+
+  useEffect(()=>{
+    setRatesToHkd(current=>{
+      const next = {...current,HKD:1};
+      for(const currency of expenseCurrencies){
+        if(currency==="HKD") next[currency]=1;
+        else if(!next[currency]) next[currency]=0;
+      }
+      return next;
+    });
+  },[expenseCurrencies.join("|")]);
+
+  const autofillRates = async()=>{
+    const foreignCurrencies=expenseCurrencies.filter(currency=>currency!=="HKD");
+    if(foreignCurrencies.length===0) return;
+    const todayKey = new Date().toISOString().slice(0,10);
+    const rateDate = trip.endDate && trip.endDate<=todayKey ? trip.endDate : "latest";
+    setRateStatus(`Loading ${rateDate==="latest"?"latest":rateDate} HKD rates…`);
+    try{
+      const rows = await Promise.all(foreignCurrencies.map(async currency=>{
+        const response = await fetch(`https://api.frankfurter.app/${rateDate}?from=${encodeURIComponent(currency)}&to=HKD`);
+        if(!response.ok) throw new Error(`Rate lookup failed for ${currency}`);
+        const data = await response.json();
+        return [currency,Number(data?.rates?.HKD)] as const;
+      }));
+      setRatesToHkd(current=>({...current,HKD:1,...Object.fromEntries(rows.filter(([,rate])=>Number.isFinite(rate)&&rate>0))}));
+      setRateStatus(`${rateDate==="latest"?"Latest":rateDate} rates loaded. You can still adjust them manually.`);
+    }catch(err){
+      setRateStatus(err instanceof Error ? err.message : "Could not load rates. Please enter them manually.");
+    }
+  };
 
   const toggleParticipant=(pid:string)=>{
     setForm(f=>({...f,participants:f.participants.includes(pid)?f.participants.filter(x=>x!==pid):[...f.participants,pid]}));
@@ -3894,6 +3985,56 @@ function TripExpenses({trip,user,canEdit,profiles,th,t,onAdd,onUpdateExpense,onR
               </p>)}
             </div>)}
           </div>
+        </Card>}
+
+        {generalSettlementLines.length>0&&<Card th={th} className="p-5 sm:p-8 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-5">
+            <div>
+              <h3 className="text-xl font-bold">Trip Total</h3>
+              <p className={cx("text-sm mt-1",th==="dark"?"text-slate-400":"text-slate-500")}>
+                Net settlement by currency first, then convert the final payable summary to HKD.
+              </p>
+            </div>
+            {expenseCurrencies.some(currency=>currency!=="HKD")&&<Btn th={th} v="sec" sz="sm" onClick={autofillRates}>Autofill HKD rates</Btn>}
+          </div>
+
+          <div className="space-y-5">
+            {expenseCurrencies.map(currency=>{
+              const rows=generalSettlementLines.filter(line=>line.currency===currency);
+              if(rows.length===0) return null;
+              return <div key={`general-${currency}`} className="space-y-2">
+                <p className={cx("text-sm font-semibold",th==="dark"?"text-cyan-300":"text-blue-700")}>{currency}</p>
+                {rows.map((line,index)=><p key={`${currency}-net-${index}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
+                  <span className="font-semibold">{line.from}</span> {t("owes")} <span className="font-semibold">{line.to}</span>:{" "}
+                  <span className="font-bold">{fmtCur(line.gross,currency)}</span>
+                  {line.offset>0&&<> - <span className="font-bold">{fmtCur(line.offset,currency)}</span></>}
+                  {" = "}<span className="text-cyan-400 font-bold">{fmtCur(line.amount,currency)}</span>
+                </p>)}
+              </div>;
+            })}
+          </div>
+
+          {expenseCurrencies.some(currency=>currency!=="HKD")&&<div className={cx("mt-6 rounded-2xl border p-4",th==="dark"?"border-white/10 bg-white/[0.04]":"border-slate-200 bg-slate-50")}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+              <p className="font-semibold">Transfer rates to HKD</p>
+              {rateStatus&&<p className={cx("text-xs",rateStatus.includes("failed")||rateStatus.includes("Could not")? "text-amber-400" : th==="dark"?"text-slate-400":"text-slate-500")}>{rateStatus}</p>}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {expenseCurrencies.filter(currency=>currency!=="HKD").map(currency=><Input key={`rate-${currency}`} th={th} label={`1 ${currency} = HKD`} type="number" step="0.000001" value={ratesToHkd[currency] || ""}
+                onChange={event=>setRatesToHkd(current=>({...current,[currency]:Number(event.target.value)}))}/>)}
+            </div>
+          </div>}
+
+          {finalHkdSettlementLines.length>0&&<div className="mt-6">
+            <h4 className="font-bold mb-3">Summary</h4>
+            <div className="space-y-2">
+              {finalHkdSettlementLines.map((line,index)=><p key={`final-hkd-${index}`} className={cx("text-sm",th==="dark"?"text-slate-300":"text-slate-600")}>
+                <span className="font-semibold">{line.from}</span> {t("owes")} <span className="font-semibold">{line.to}</span>:{" "}
+                {line.offset>0&&<>{fmtCur(line.gross,"HKD")} - {fmtCur(line.offset,"HKD")} = </>}
+                <span className="text-cyan-400 font-bold">{fmtCur(line.amount,"HKD")}</span>
+              </p>)}
+            </div>
+          </div>}
         </Card>}
 
         {/* Balance Summary */}
