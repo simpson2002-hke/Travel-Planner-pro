@@ -363,6 +363,13 @@ const withOptionalWeatherLanguage = (url:string, query:string)=>{
   }
 };
 const isWebAttachmentUrl = (url:string)=>/^https?:\/\//i.test(url.trim());
+const NOTE_LINK_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+const splitTrailingUrlPunctuation = (url:string)=>{
+  const match = url.match(/[),.!?:;]+$/);
+  if(!match) return { hrefText: url, trailing: "" };
+  const trailing = match[0];
+  return { hrefText: url.slice(0,-trailing.length), trailing };
+};
 const buildReminderNotesSummary = (notes:TravelNote[], t:(k:TKey)=>string)=>{
   const noteTexts = notes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
   const attachmentLinks = notes
@@ -381,6 +388,28 @@ const openReminderDraftInGmail = ({memberIds,profiles,subjectTemplate,tripTitle,
   const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, normalizedBody);
   window.open(gmailUrl,"_blank","noopener,noreferrer");
   return true;
+};
+const LinkifiedNoteText = ({text, className, linkClassName}:{text:string; className?:string; linkClassName?:string})=>{
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  NOTE_LINK_PATTERN.lastIndex = 0;
+  while((match = NOTE_LINK_PATTERN.exec(text)) !== null){
+    const rawUrl = match[0];
+    const matchIndex = match.index;
+    if(matchIndex > lastIndex) parts.push(text.slice(lastIndex,matchIndex));
+    const { hrefText, trailing } = splitTrailingUrlPunctuation(rawUrl);
+    const href = /^https?:\/\//i.test(hrefText) ? hrefText : `https://${hrefText}`;
+    parts.push(
+      <a key={`${matchIndex}-${hrefText}`} href={href} target="_blank" rel="noreferrer" className={linkClassName}>
+        {hrefText}
+      </a>
+    );
+    if(trailing) parts.push(trailing);
+    lastIndex = matchIndex + rawUrl.length;
+  }
+  if(lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <p className={className}>{parts}</p>;
 };
 const toTimeMinutes = (time:string)=>{
   const [rawH,rawM] = (time || "").split(":");
@@ -2946,7 +2975,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                   <Btn th={th} v="sec" sz="sm" onClick={()=>{setEditingNoteId(null);setEditingNoteText("");}} disabled={!canEdit}>{t("cancel")}</Btn>
                 </div>
               </div>
-            : (note.text&&<p className="mb-4 whitespace-pre-wrap break-words">{note.text}</p>)}
+            : (note.text&&<LinkifiedNoteText text={note.text} className="mb-4 whitespace-pre-wrap break-words" linkClassName={cx("font-semibold underline underline-offset-2",th==="dark"?"text-cyan-300":"text-blue-700")}/>)}
           {note.attachments.length>0&&<div className="grid sm:grid-cols-2 gap-3">{note.attachments.map((att,index)=><a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noreferrer" download={att.name} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3 border transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06] text-cyan-300":"border-slate-200 bg-white hover:bg-slate-50 text-blue-700")}>
             <span className="truncate min-w-0 font-medium">{att.name}</span>
             <span className="text-xs uppercase tracking-[0.18em]">{t("downloadAttachment")}</span>
