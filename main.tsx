@@ -1212,6 +1212,24 @@ function escapeHtml(value:string){
     .replace(/'/g,"&#39;");
 }
 
+function linkifyTextHtml(value:string){
+  let html = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  LINK_TEXT_PATTERN.lastIndex = 0;
+  while((match = LINK_TEXT_PATTERN.exec(value)) !== null){
+    const rawUrl = match[0];
+    const matchIndex = match.index;
+    if(matchIndex > lastIndex) html += escapeHtml(value.slice(lastIndex,matchIndex));
+    const { hrefText, trailing } = splitTrailingUrlPunctuation(rawUrl);
+    const href = /^https?:\/\//i.test(hrefText) ? hrefText : `https://${hrefText}`;
+    html += `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(hrefText)}</a>${escapeHtml(trailing)}`;
+    lastIndex = matchIndex + rawUrl.length;
+  }
+  if(lastIndex < value.length) html += escapeHtml(value.slice(lastIndex));
+  return html;
+}
+
 function pdfList(items:string[]){
   return items.length ? `<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<p class="muted">—</p>';
 }
@@ -1260,6 +1278,7 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string, inclu
       .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
       .value { font-size: 12px; line-height: 1.4; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
       .muted { color: #64748b; font-size: 11px; }
+      .muted a { color: #1d4ed8; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
       .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 10px; page-break-inside: avoid; break-inside: avoid; }
       .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
@@ -1310,7 +1329,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("terminal"))}</div><div class="value">${escapeHtml(leg.terminal || "—")}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("bookingReference"))}</div><div class="value">${escapeHtml(leg.bookingReference || "—")}</div></div>
         </div>
-        ${leg.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(leg.notes)}</p>` : ""}
+        ${leg.notes ? `<p style="margin-top:12px" class="muted">${linkifyTextHtml(leg.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
       </div>
     </section>` : ""}
@@ -1334,7 +1353,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("checkOut"))}</div><div class="value">${escapeHtml(hotel.checkOut ? fmtDate(hotel.checkOut) : "—")}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("confirmationCode"))}</div><div class="value">${escapeHtml(hotel.confirmationCode || "—")}</div></div>
         </div>
-        ${hotel.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(hotel.notes)}</p>` : ""}
+        ${hotel.notes ? `<p style="margin-top:12px" class="muted">${linkifyTextHtml(hotel.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
       </div>
     </section>` : ""}
