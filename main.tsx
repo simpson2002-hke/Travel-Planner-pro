@@ -363,6 +363,13 @@ const withOptionalWeatherLanguage = (url:string, query:string)=>{
   }
 };
 const isWebAttachmentUrl = (url:string)=>/^https?:\/\//i.test(url.trim());
+const LINK_TEXT_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+const splitTrailingUrlPunctuation = (url:string)=>{
+  const match = url.match(/[),.!?:;]+$/);
+  if(!match) return { hrefText: url, trailing: "" };
+  const trailing = match[0];
+  return { hrefText: url.slice(0,-trailing.length), trailing };
+};
 const buildReminderNotesSummary = (notes:TravelNote[], t:(k:TKey)=>string)=>{
   const noteTexts = notes.slice(0,3).map(note=>note.text?.trim()).filter(Boolean);
   const attachmentLinks = notes
@@ -381,6 +388,28 @@ const openReminderDraftInGmail = ({memberIds,profiles,subjectTemplate,tripTitle,
   const gmailUrl = buildGmailComposeUrl(recipients.join(","), subject, normalizedBody);
   window.open(gmailUrl,"_blank","noopener,noreferrer");
   return true;
+};
+const LinkifiedText = ({text, className, linkClassName}:{text:string; className?:string; linkClassName?:string})=>{
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  LINK_TEXT_PATTERN.lastIndex = 0;
+  while((match = LINK_TEXT_PATTERN.exec(text)) !== null){
+    const rawUrl = match[0];
+    const matchIndex = match.index;
+    if(matchIndex > lastIndex) parts.push(text.slice(lastIndex,matchIndex));
+    const { hrefText, trailing } = splitTrailingUrlPunctuation(rawUrl);
+    const href = /^https?:\/\//i.test(hrefText) ? hrefText : `https://${hrefText}`;
+    parts.push(
+      <a key={`${matchIndex}-${hrefText}`} href={href} target="_blank" rel="noreferrer" className={linkClassName}>
+        {hrefText}
+      </a>
+    );
+    if(trailing) parts.push(trailing);
+    lastIndex = matchIndex + rawUrl.length;
+  }
+  if(lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return <p className={className}>{parts}</p>;
 };
 const toTimeMinutes = (time:string)=>{
   const [rawH,rawM] = (time || "").split(":");
@@ -1183,6 +1212,24 @@ function escapeHtml(value:string){
     .replace(/'/g,"&#39;");
 }
 
+function linkifyTextHtml(value:string){
+  let html = "";
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  LINK_TEXT_PATTERN.lastIndex = 0;
+  while((match = LINK_TEXT_PATTERN.exec(value)) !== null){
+    const rawUrl = match[0];
+    const matchIndex = match.index;
+    if(matchIndex > lastIndex) html += escapeHtml(value.slice(lastIndex,matchIndex));
+    const { hrefText, trailing } = splitTrailingUrlPunctuation(rawUrl);
+    const href = /^https?:\/\//i.test(hrefText) ? hrefText : `https://${hrefText}`;
+    html += `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(hrefText)}</a>${escapeHtml(trailing)}`;
+    lastIndex = matchIndex + rawUrl.length;
+  }
+  if(lastIndex < value.length) html += escapeHtml(value.slice(lastIndex));
+  return html;
+}
+
 function pdfList(items:string[]){
   return items.length ? `<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>` : '<p class="muted">—</p>';
 }
@@ -1231,6 +1278,7 @@ function exportTripToPdf(trip:Trip, members:Profile[], t:(k:TKey)=>string, inclu
       .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
       .value { font-size: 12px; line-height: 1.4; font-weight: 600; white-space: pre-wrap; word-break: break-word; }
       .muted { color: #64748b; font-size: 11px; }
+      .muted a { color: #1d4ed8; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
       .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .card { border: 1px solid #dbe3f0; border-radius: 12px; padding: 10px; page-break-inside: avoid; break-inside: avoid; }
       .row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
@@ -1281,7 +1329,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("terminal"))}</div><div class="value">${escapeHtml(leg.terminal || "—")}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("bookingReference"))}</div><div class="value">${escapeHtml(leg.bookingReference || "—")}</div></div>
         </div>
-        ${leg.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(leg.notes)}</p>` : ""}
+        ${leg.notes ? `<p style="margin-top:12px" class="muted">${linkifyTextHtml(leg.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
       </div>
     </section>` : ""}
@@ -1305,7 +1353,7 @@ ${escapeHtml(fmtDate(trip.endDate))}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("checkOut"))}</div><div class="value">${escapeHtml(hotel.checkOut ? fmtDate(hotel.checkOut) : "—")}</div></div>
           <div class="tile"><div class="label">${escapeHtml(t("confirmationCode"))}</div><div class="value">${escapeHtml(hotel.confirmationCode || "—")}</div></div>
         </div>
-        ${hotel.notes ? `<p style="margin-top:12px" class="muted">${escapeHtml(hotel.notes)}</p>` : ""}
+        ${hotel.notes ? `<p style="margin-top:12px" class="muted">${linkifyTextHtml(hotel.notes)}</p>` : ""}
       </div>`).join("") : '<p class="muted">—</p>'}
       </div>
     </section>` : ""}
@@ -2869,7 +2917,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             </div>
             {leg.notes&&<div className={cx("mt-5 rounded-2xl border p-4",th==="dark"?"border-white/10 bg-white/[0.04]":"border-slate-200 bg-white")}>
               <p className={cx("text-xs font-semibold uppercase tracking-[0.16em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("legNotes")}</p>
-              <p className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")}>{leg.notes}</p>
+              <LinkifiedText text={leg.notes} className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")} linkClassName={cx("font-semibold underline underline-offset-2",th==="dark"?"text-cyan-300":"text-blue-700")}/>
             </div>}
           </div>)}</div>}
         </Card>}
@@ -2899,7 +2947,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
             </div>
             {hotel.notes&&<div className={cx("mt-5 rounded-2xl border p-4",th==="dark"?"border-white/10 bg-white/[0.04]":"border-slate-200 bg-white")}>
               <p className={cx("text-xs font-semibold uppercase tracking-[0.16em]",th==="dark"?"text-slate-400":"text-slate-500")}>{t("stayNotes")}</p>
-              <p className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")}>{hotel.notes}</p>
+              <LinkifiedText text={hotel.notes} className={cx("mt-2 text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-200":"text-slate-700")} linkClassName={cx("font-semibold underline underline-offset-2",th==="dark"?"text-cyan-300":"text-blue-700")}/>
             </div>}
           </div>)}</div>}
         </Card>}
@@ -2946,7 +2994,7 @@ function TripOverview({trip,user,profiles,siteCfg,canEdit,th,t,onUpdate}:{trip:T
                   <Btn th={th} v="sec" sz="sm" onClick={()=>{setEditingNoteId(null);setEditingNoteText("");}} disabled={!canEdit}>{t("cancel")}</Btn>
                 </div>
               </div>
-            : (note.text&&<p className="mb-4 whitespace-pre-wrap break-words">{note.text}</p>)}
+            : (note.text&&<LinkifiedText text={note.text} className="mb-4 whitespace-pre-wrap break-words" linkClassName={cx("font-semibold underline underline-offset-2",th==="dark"?"text-cyan-300":"text-blue-700")}/>)}
           {note.attachments.length>0&&<div className="grid sm:grid-cols-2 gap-3">{note.attachments.map((att,index)=><a key={`${att.url}-${index}`} href={att.url} target="_blank" rel="noreferrer" download={att.name} className={cx("flex items-center justify-between gap-3 rounded-2xl px-4 py-3 border transition",th==="dark"?"border-white/8 bg-white/[0.03] hover:bg-white/[0.06] text-cyan-300":"border-slate-200 bg-white hover:bg-slate-50 text-blue-700")}>
             <span className="truncate min-w-0 font-medium">{att.name}</span>
             <span className="text-xs uppercase tracking-[0.18em]">{t("downloadAttachment")}</span>
