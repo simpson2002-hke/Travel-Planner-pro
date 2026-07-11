@@ -291,7 +291,10 @@ const fmtDateWithWeekday = (v:string, t?:(k:TKey)=>string)=>{
     const weekday = date.toLocaleDateString("zh-HK",{weekday:"narrow"});
     return `${monthDay}(${weekday})`;
   }
-  return date.toLocaleDateString(localeFromTranslator(t),{weekday:"short",month:"short",day:"numeric",year:"numeric"});
+  const day = date.toLocaleDateString("en-US",{day:"numeric"});
+  const month = date.toLocaleDateString("en-US",{month:"short"}).toUpperCase();
+  const weekday = date.toLocaleDateString("en-US",{weekday:"short"});
+  return `${day} ${month} (${weekday})`;
 };
 const fmtTripDayDate = (startDate:string, day:number, t?:(k:TKey)=>string)=>{
   const date = tripDateForDay(startDate, day);
@@ -3488,7 +3491,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
 
       <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
-        <div className="mb-4 -mx-1 flex min-w-0 items-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin]">
+        <div className="mb-4 -mx-1 flex max-h-40 min-w-0 flex-wrap items-center gap-2 overflow-y-auto overflow-x-auto overscroll-contain scroll-smooth px-1 pb-3 pr-2 [scrollbar-width:thin] sm:max-h-none sm:flex-nowrap">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("flex-none rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
         </div>
         <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
