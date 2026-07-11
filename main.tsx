@@ -194,7 +194,7 @@ const defaultSiteSettings: SiteSettings = {
 const SK = {
   profiles:"tp-profiles", trips:"tp-trips", adminPw:"tp-admin-pw",
   adminAuth:"tp-admin-auth", userId:"tp-current-user", theme:"tp-theme",
-  site:"tp-site-settings", lang:"tp-lang",
+  site:"tp-site-settings", lang:"tp-lang", desktopLayout:"tp-desktop-layout",
 };
 
 const HERO_IMAGES = [
@@ -488,22 +488,29 @@ function usePersist<T>(key:string,init:T){
   return [s,set] as const;
 }
 
+function isDesktopLayoutForced(){
+  if(typeof document==="undefined") return false;
+  return document.documentElement.dataset.layoutMode==="desktop";
+}
+
 function usePortraitMobile(){
   const [isPortraitMobile,setIsPortraitMobile]=useState(()=>{
     if(typeof window==="undefined") return false;
-    return window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
+    return !isDesktopLayoutForced() && window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
   });
 
   useEffect(()=>{
     if(typeof window==="undefined") return;
     const mediaQuery=window.matchMedia("(max-width: 767px) and (orientation: portrait)");
-    const update=()=>setIsPortraitMobile(mediaQuery.matches);
+    const update=()=>setIsPortraitMobile(!isDesktopLayoutForced() && mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change",update);
     window.addEventListener("resize",update);
+    window.addEventListener("tp-layout-mode-change",update);
     return ()=>{
       mediaQuery.removeEventListener?.("change",update);
       window.removeEventListener("resize",update);
+      window.removeEventListener("tp-layout-mode-change",update);
     };
   },[]);
 
@@ -513,19 +520,21 @@ function usePortraitMobile(){
 function useMobileScreen(){
   const [isMobileScreen,setIsMobileScreen]=useState(()=>{
     if(typeof window==="undefined") return false;
-    return window.matchMedia("(max-width: 900px)").matches;
+    return !isDesktopLayoutForced() && window.matchMedia("(max-width: 900px)").matches;
   });
 
   useEffect(()=>{
     if(typeof window==="undefined") return;
     const mediaQuery=window.matchMedia("(max-width: 900px)");
-    const update=()=>setIsMobileScreen(mediaQuery.matches);
+    const update=()=>setIsMobileScreen(!isDesktopLayoutForced() && mediaQuery.matches);
     update();
     mediaQuery.addEventListener?.("change",update);
     window.addEventListener("resize",update);
+    window.addEventListener("tp-layout-mode-change",update);
     return ()=>{
       mediaQuery.removeEventListener?.("change",update);
       window.removeEventListener("resize",update);
+      window.removeEventListener("tp-layout-mode-change",update);
     };
   },[]);
 
@@ -2179,8 +2188,9 @@ function Landing({siteName,desc,t,onIn,onUp}:{th:ThemeMode;siteName:string;desc:
 /* ═══════════════════════════════════════════════════════════════════════════════
    HEADER
    ═══════════════════════════════════════════════════════════════════════════════ */
-function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onSignIn,onSync,isSyncing}:{
+function Header({siteName,th,setTh,lang,setLang,desktopLayout,setDesktopLayout,user,view,setView,t,onLogout,onSignIn,onSync,isSyncing}:{
   siteName:string;th:ThemeMode;setTh:(v:ThemeMode)=>void;lang:Language;setLang:(v:Language)=>void;
+  desktopLayout:boolean;setDesktopLayout:(v:boolean)=>void;
   user?:Profile;view:ViewMode;setView:(v:ViewMode)=>void;t:(k:TKey)=>string;onLogout:()=>void;onSignIn:()=>void;
   onSync:()=>void;isSyncing:boolean;
 }){
@@ -2204,6 +2214,9 @@ function Header({siteName,th,setTh,lang,setLang,user,view,setView,t,onLogout,onS
             th==="dark"?"bg-white/5 hover:bg-white/10":"bg-slate-100 hover:bg-slate-200")}>
           {th==="dark"?"☀️":"🌙"}
         </button>
+        <Btn th={th} v="ghost" sz="sm" onClick={()=>setDesktopLayout(!desktopLayout)} className="shrink-0" title={desktopLayout?"Use mobile layout":"Use desktop layout"}>
+          {desktopLayout ? "📱 Mobile" : "🖥️ Desktop"}
+        </Btn>
         <Btn th={th} v="ghost" sz="sm" onClick={onSync} disabled={isSyncing} className="shrink-0">
           {isSyncing ? "Syncing…" : "Sync now"}
         </Btn>
@@ -3307,6 +3320,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
   const [optionalEditId,setOptionalEditId]=useState<string|null>(null);
   const [travelerView,setTravelerView]=useState(user.id);
   const [swapTargetDay,setSwapTargetDay]=useState(trip.duration>=2 ? 2 : 1);
+  const isPortraitMobile=usePortraitMobile();
   const dayLabel = (dayNumber:number)=>fmtTripDayDate(trip.startDate, dayNumber, t);
   const canManageItem = (item?:ItineraryItem)=> item?.activityType==="free-time"
     ? (canEdit || item.freeTimeOwnerId===user.id)
@@ -3527,25 +3541,25 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
     }
   },[day,swapTargetDay,trip.duration]);
 
-  return <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
-    <div className="space-y-5">
-      <Card th={th} className="p-5 space-y-4">
-        <div className="grid sm:grid-cols-4 gap-3">
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
-          <div className={cx("rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{optionalCount}</p></div>
+  return <div className={cx("grid min-w-0 max-w-full gap-6 overflow-x-hidden xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]",isPortraitMobile&&"gap-4")}>
+    <div className={cx("space-y-5",isPortraitMobile&&"space-y-4")}>
+      <Card th={th} className={cx("space-y-4",isPortraitMobile?"p-3":"p-5")}>
+        <div className={cx("grid gap-3 sm:grid-cols-4",isPortraitMobile&&"grid-cols-2 gap-2")}>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itinerary")}</p><p className="mt-1 text-2xl font-bold">{totalItems}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("day")}</p><p className="mt-1 break-words text-xl font-bold leading-snug">{dayLabel(day)}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("itineraryPhoto")}</p><p className="mt-1 text-2xl font-bold">{photoCount}</p></div>
+          <div className={cx("min-w-0 overflow-hidden rounded-2xl p-4",th==="dark"?"bg-white/[0.04]":"bg-slate-100")}><p className={cx("break-words text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>{t("optionalPlaces")}</p><p className="mt-1 text-2xl font-bold">{optionalCount}</p></div>
         </div>
       </Card>
 
-      <Card th={th} className="p-5 sm:p-8 min-w-0 overflow-hidden">
+      <Card th={th} className={cx("min-w-0 overflow-hidden",isPortraitMobile?"p-3":"p-5 sm:p-8")}>
         <Select th={th} label={t("date")} value={String(day)} onChange={e=>setDay(Number(e.target.value)||1)} className="mb-4 lg:hidden">
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><option key={`day-jump-${d}`} value={d}>{dayLabel(d)}</option>)}
         </Select>
-        <div className="mb-4 -mx-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-scroll overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/60 [&::-webkit-scrollbar-track]:bg-transparent" aria-label={t("date")}>
+        {!isPortraitMobile&&<div className="mb-4 -mx-1 flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain scroll-smooth px-1 pb-3 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-400/60 [&::-webkit-scrollbar-track]:bg-transparent" aria-label={t("date")}>
           {Array.from({length:trip.duration},(_,i)=>i+1).map(d=><button key={d} onClick={()=>setDay(d)} className={cx("flex-none rounded-2xl px-4 py-2.5 font-medium whitespace-nowrap transition border",d===day?(th==="dark"?"bg-cyan-400 text-slate-950 border-cyan-300":"bg-slate-800 text-white border-slate-700"):(th==="dark"?"bg-white/5 text-slate-400 hover:bg-white/10 border-white/10":"bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200"))}>{dayLabel(d)}</button>)}
-        </div>
-        <div className={cx("mb-6 rounded-2xl p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
+        </div>}
+        <div className={cx("mb-6 rounded-2xl",isPortraitMobile?"p-3":"p-4",th==="dark"?"bg-white/[0.03]":"bg-slate-100")}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold">{t("splitTimelineByTraveler")}</p>
             <Select th={th} value={travelerView} onChange={e=>setTravelerView(e.target.value)} className="w-full sm:w-auto sm:max-w-[220px] !rounded-xl !px-3 !py-2 text-sm">
@@ -3563,17 +3577,17 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
 
         <Tabs tabs={[{id:"schedule",label:t("itinerarySchedule"),icon:"🗓️"},{id:"saved",label:t("optionalPlaces"),icon:"📌"}]} active={activePane} onChange={setActivePane} th={th}/>
 
-        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className="mt-6 space-y-5 max-w-full">{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative min-w-0 max-w-full">
-          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("p-4 sm:p-5 rounded-3xl min-w-0 overflow-hidden",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
-            <div className="flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
-              <div className="flex flex-col gap-1"><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
-              <div className="flex-1 min-w-0">
-                <div className="mb-2 flex items-start justify-between gap-3"><div className="min-w-0"><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className="text-lg font-bold break-words">{it.needsFollowUp?`“${it.title}”`:it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
+        {activePane==="schedule" ? (<>{dayItems.length===0?<div className="mt-6"><Empty icon="🗓️" title={t("noItinerary")} desc={t("noItineraryDesc")} th={th}/></div>:<div className={cx("mt-6 max-w-full",isPortraitMobile?"space-y-3":"space-y-5")}>{dayItems.map((it,idx)=><div key={it.id} className="space-y-3 relative min-w-0 max-w-full">
+          {idx<dayItems.length-1&&<span className={cx("absolute left-[18px] top-14 h-[calc(100%-1.2rem)] w-px",th==="dark"?"bg-white/10":"bg-slate-200")}/>}<Card th={th} className={cx("rounded-3xl min-w-0 overflow-hidden",isPortraitMobile?"p-3":"p-4 sm:p-5",it.transport==="Flight"?(th==="dark"?"bg-indigo-500/10 border-indigo-400/40":"bg-indigo-50 border-indigo-200"):"",it.needsFollowUp&&(th==="dark"?"bg-amber-400/10 border-amber-300/40":"bg-amber-50 border-amber-300"))}>
+            <div className={cx("flex items-start gap-3 sm:gap-4",isPortraitMobile?"flex-col":"flex-col sm:flex-row")}>
+              <div className={cx("gap-1",isPortraitMobile?"flex w-full justify-end":"flex flex-col")}><button onClick={()=>move(idx,-1)} disabled={!canEdit||idx===0} className="rounded-full px-2 py-1 text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▲</button><button onClick={()=>move(idx,1)} disabled={!canEdit||idx===dayItems.length-1} className="rounded-full px-2 py-1 text-lg opacity-60 hover:opacity-100 disabled:opacity-20">▼</button></div>
+              <div className="w-full flex-1 min-w-0">
+                <div className={cx("mb-2 flex items-start gap-3",isPortraitMobile?"flex-col":"justify-between")}><div className="min-w-0"><p className={cx("text-sm font-mono",th==="dark"?"text-cyan-400":"text-blue-600")}>{it.startTime} - {it.endTime}{(it.endDayOffset??0)>0?` (+${it.endDayOffset}d)`:""}</p><p className={cx("font-bold break-words",isPortraitMobile?"text-base":"text-lg")}>{it.needsFollowUp?`“${it.title}”`:it.title}</p></div><Badge label={it.activityType==="free-time"?t("freeTime"):it.activityType==="transport"?t("transport"):t("activity")} th={th} color={it.activityType==="free-time"?"amber":it.activityType==="transport"?"green":undefined}/></div>
                 {it.needsFollowUp&&<p className={cx("mb-2 rounded-xl border px-3 py-2 text-sm font-semibold",th==="dark"?"border-amber-200/40 bg-amber-300/10 text-amber-200":"border-amber-300 bg-amber-100 text-amber-800")}>⚠️ {t("followUpBadge")} {it.followUpNote ? `— “${it.followUpNote}”` : ""}</p>}
                 {it.stopLocation&&<p className={cx("mb-2 text-sm",th==="dark"?"text-cyan-300":"text-blue-700")}>📍 {it.stopLocation}</p>}
                 {it.details&&<p className={cx("text-sm leading-6 break-words whitespace-pre-wrap",th==="dark"?"text-slate-400":"text-slate-500")}>{it.details}</p>}
 
-                {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid w-full max-w-full gap-3",it.mapUrl&&it.photo?"grid-cols-1 sm:grid-cols-2":"grid-cols-1",mediaRowClassBySize[it.mediaSize ?? "small"])}>
+                {(it.mapUrl || it.photo)&&<div className={cx("mt-4 grid w-full max-w-full gap-3",it.mapUrl&&it.photo?"grid-cols-1 sm:grid-cols-2":"grid-cols-1",isPortraitMobile?"max-w-full":mediaRowClassBySize[it.mediaSize ?? "small"])}>
                   {it.mapUrl&&<div className={cx("overflow-hidden rounded-2xl border border-white/10",it.photo ? "aspect-square" : "aspect-[16/9] max-h-44")}>
                     <iframe src={it.mapUrl} title={`${it.title}-map`} loading="lazy" className="h-full w-full"/>
                   </div>}
@@ -3582,7 +3596,7 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
                   </div>}
                 </div>}
               </div>
-              <div className="flex w-full sm:w-auto gap-2 justify-end self-end sm:self-start"><Btn th={th} v="ghost" sz="sm" onClick={()=>transferScheduleItemToOptional(it)} disabled={!canEdit}>{t("moveToOptional")}</Btn><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
+              <div className={cx("flex w-full gap-2",isPortraitMobile?"flex-wrap justify-stretch self-stretch [&>*:first-child]:flex-1":"sm:w-auto justify-end self-end sm:self-start")}><Btn th={th} v="ghost" sz="sm" onClick={()=>transferScheduleItemToOptional(it)} disabled={!canEdit}>{t("moveToOptional")}</Btn><button onClick={()=>edit(it)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm",th==="dark"?"bg-white/10 hover:bg-white/20":"bg-slate-100 hover:bg-slate-200","disabled:opacity-40")}>✏️</button><button onClick={()=>remove(it.id)} disabled={!canManageItem(it)} className={cx("rounded-full px-2.5 py-1 text-sm text-rose-400",th==="dark"?"bg-rose-500/10 hover:bg-rose-500/20":"bg-rose-50 hover:bg-rose-100","disabled:opacity-40")}>✕</button></div>
             </div>
           </Card>
         </div>)}</div>}
@@ -3610,8 +3624,8 @@ function TripItinerary({trip,user,profiles,canEdit,canEditFreeTime,th,t,onUpdate
       </Card>
     </div>
 
-    <Card th={th} className="p-5 sm:p-6 h-fit xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] flex flex-col min-w-0">
-      <div className={cx("mb-4 w-full rounded-3xl border p-4 sm:p-5",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
+    <Card th={th} className={cx("h-fit flex flex-col min-w-0",isPortraitMobile?"p-3":"p-5 sm:p-6 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)]")}>
+      <div className={cx("mb-4 w-full rounded-3xl border",isPortraitMobile?"p-3":"p-4 sm:p-5",th==="dark"?"border-white/10 bg-white/[0.02]":"border-slate-200 bg-slate-50")}>
         <p className="text-base font-semibold">🔁 {t("swapThisDayItinerary")}</p>
         <p className={cx("mt-1 text-xs",th==="dark"?"text-slate-400":"text-slate-500")}>
           {t("swapItineraryHelp").replace("{day}",dayLabel(day))}
@@ -5162,6 +5176,7 @@ function AdminPasswordForm({th,t,onSave}:{th:ThemeMode;t:(k:TKey)=>string;onSave
 export function App(){
   const [theme,setTheme]=usePersist<ThemeMode>(SK.theme,"dark");
   const [lang,setLang]=usePersist<Language>(SK.lang,"en");
+  const [desktopLayout,setDesktopLayout]=usePersist<boolean>(SK.desktopLayout,false);
   const [profiles,setProfiles,profilesMeta]=useSharedPersist<Profile[]>(SK.profiles,[]);
   const [trips,setTrips,tripsMeta]=useSharedPersist<Trip[]>(SK.trips,[]);
   const [adminPw,setAdminPw,adminPwMeta]=useSharedPersist<string>(SK.adminPw,"");
@@ -5193,6 +5208,14 @@ export function App(){
     });
   },[setTrips,siteCfg,siteCfgMeta.hydrated,tripsMeta.hydrated]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
+  useEffect(()=>{
+    if(typeof document==="undefined") return;
+    const root=document.documentElement;
+    const viewport=document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    root.dataset.layoutMode=desktopLayout?"desktop":"responsive";
+    viewport?.setAttribute("content",desktopLayout?"width=1200, initial-scale=0.35":"width=device-width, initial-scale=1.0");
+    window.dispatchEvent(new Event("tp-layout-mode-change"));
+  },[desktopLayout]);
 
   const sharedSyncReady = profilesMeta.hydrated && tripsMeta.hydrated && adminPwMeta.hydrated && siteCfgMeta.hydrated;
   const sharedSyncErrors = [profilesMeta.lastError,tripsMeta.lastError,adminPwMeta.lastError,siteCfgMeta.lastError].filter(Boolean);
@@ -5402,6 +5425,7 @@ export function App(){
     </>}
 
     {!showLanding&&<Header siteName={siteCfg.siteName} th={theme} setTh={setTheme} lang={lang} setLang={setLang}
+      desktopLayout={desktopLayout} setDesktopLayout={setDesktopLayout}
       user={user} view={view} setView={setView} t={t}
       onLogout={()=>setUserId("")} onSignIn={()=>{setAuthMode("signin");setShowAuth(true);}}
       onSync={()=>{refreshSharedSync().catch(()=>{});}} isSyncing={manualSyncing}/>}
