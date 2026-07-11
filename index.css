@@ -80,3 +80,11 @@ input[type="color"] { padding: 2px 4px; border-radius: 8px; }
   .mobile-tight .p-6 { padding: 0.9rem !important; }
   .mobile-tight .p-5 { padding: 0.85rem !important; }
 }
+
+html[data-layout-mode="desktop"],
+html[data-layout-mode="desktop"] body,
+html[data-layout-mode="desktop"] #root {
+  max-width: none;
+  min-width: 1200px;
+  overflow-x: auto;
+}
