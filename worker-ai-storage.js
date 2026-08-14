@@ -11,6 +11,8 @@ const DEFAULT_CORS_HEADERS = {
   'access-control-allow-methods': 'GET, POST, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization, x-requested-with',
   'access-control-max-age': '86400',
+  'access-control-expose-headers': 'access-control-allow-origin, access-control-allow-methods, access-control-allow-headers, access-control-max-age, cache-control',
+  'cache-control': 'no-store',
 };
 
 function corsHeaders(request) {
@@ -269,8 +271,26 @@ if (typeof workerGlobal.addEventListener === 'function') {
   });
 }
 
+function decodeUrlPayload(encoded) {
+  if (!encoded) return null;
+  try {
+    const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 function payloadFromGetRequest(request) {
   const url = new URL(request.url);
+  const encodedPayload = url.searchParams.get('payload');
+  const tunneledPayload = decodeUrlPayload(encodedPayload);
+  if (tunneledPayload?.action) return tunneledPayload;
+
   const action = url.searchParams.get('action');
   const key = url.searchParams.get('key');
   const id = url.searchParams.get('id') || crypto.randomUUID();
@@ -294,9 +314,6 @@ async function handleFetch(request, env) {
     if (!payload) {
       return jsonResponse({ ok: true, data: { status: 'ready' } }, 200, request);
     }
-    if (payload.action !== 'get' && payload.action !== 'has' && payload.action !== 'keys' && payload.action !== 'values' && payload.action !== 'entries') {
-      return jsonResponse({ ok: false, error: 'GET only supports read-only actions.' }, 405, request);
-    }
   } else if (request.method === 'POST') {
     try {
       payload = await request.json();
@@ -304,7 +321,7 @@ async function handleFetch(request, env) {
       return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400, request);
     }
   } else {
-    return jsonResponse({ ok: false, error: 'Use POST with JSON body, or GET with ?action=get&key=...' }, 405, request);
+    return jsonResponse({ ok: false, error: 'Use POST with JSON body, or GET with ?payload=...' }, 405, request);
   }
 
   const storage = pickStorage(env);
