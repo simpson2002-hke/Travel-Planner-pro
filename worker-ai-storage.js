@@ -6,16 +6,26 @@
 
 const memoryStore = new Map();
 
-const CORS_HEADERS = {
+const DEFAULT_CORS_HEADERS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'POST, OPTIONS',
-  'access-control-allow-headers': 'content-type',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, authorization, x-requested-with',
+  'access-control-max-age': '86400',
 };
 
-function jsonResponse(body, status) {
+function corsHeaders(request) {
+  const requestHeaders = request?.headers?.get('access-control-request-headers');
+  return {
+    ...DEFAULT_CORS_HEADERS,
+    ...(requestHeaders ? { 'access-control-allow-headers': requestHeaders } : {}),
+    vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+  };
+}
+
+function jsonResponse(body, status, request) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
+    headers: { 'content-type': 'application/json', ...corsHeaders(request) },
   });
 }
 
@@ -250,36 +260,45 @@ function postMessageResponse(event, responsePayload) {
 }
 
 const localStorageAdapter = createMemoryAdapter(memoryStore);
+const workerGlobal = typeof self !== 'undefined' ? self : globalThis;
 
-self.addEventListener('message', async (event) => {
-  const responsePayload = await toResult(event.data, localStorageAdapter);
-  postMessageResponse(event, responsePayload);
-});
+if (typeof workerGlobal.addEventListener === 'function') {
+  workerGlobal.addEventListener('message', async (event) => {
+    const responsePayload = await toResult(event.data, localStorageAdapter);
+    postMessageResponse(event, responsePayload);
+  });
+}
 
 async function handleFetch(request, env) {
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
+  }
+
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    return jsonResponse({ ok: true, data: { status: 'ready' } }, 200, request);
   }
 
   if (request.method !== 'POST') {
-    return jsonResponse({ ok: false, error: 'Use POST with JSON body: { id, action, key?, value?, entries? }' }, 405);
+    return jsonResponse({ ok: false, error: 'Use POST with JSON body: { id, action, key?, value?, entries? }' }, 405, request);
   }
 
   let payload;
   try {
     payload = await request.json();
   } catch {
-    return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400);
+    return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400, request);
   }
 
   const storage = pickStorage(env);
   const responsePayload = await toResult(payload, storage);
-  return jsonResponse(responsePayload, responsePayload.ok ? 200 : 400);
+  return jsonResponse(responsePayload, responsePayload.ok ? 200 : 400, request);
 }
 
-self.addEventListener('fetch', (event) => {
-  event.respondWith(handleFetch(event.request));
-});
+if (typeof workerGlobal.addEventListener === 'function') {
+  workerGlobal.addEventListener('fetch', (event) => {
+    event.respondWith(handleFetch(event.request));
+  });
+}
 
 export default {
   fetch(request, env) {
