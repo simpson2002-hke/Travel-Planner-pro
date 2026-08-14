@@ -215,22 +215,19 @@ localStorage.setItem('tp-cloud-worker-endpoint', 'https://YOUR-WORKER.workers.de
 location.reload();
 ```
 
-## 10) Initialize sync in the current app build (D1 REST mode)
+## 10) Initialize sync in the current app build (D1 REST fallback mode)
 
-> Important: the current app code syncs directly to Cloudflare D1 using the Cloudflare REST API (not the Worker endpoint variable).
+> Important: the app should use the Cloudflare Worker endpoint by default. Direct Cloudflare D1 REST credentials are only a fallback for private/admin troubleshooting because browser builds are public and must not contain API tokens.
 >
-> The app reads these localStorage keys on each device:
+> The app reads these optional localStorage keys on each device:
 > - `tp-cloudflare-account-id`
 > - `tp-cloudflare-d1-database-id`
 > - `tp-cloudflare-api-token`
 
-### 10.0 Current deployment defaults (already prefilled)
-The current app build now includes default Cloudflare D1 credentials, so sync can start without end-user console setup:
-- account id: `64ba8506f5d201ceed54c05d58743ce4`
-- database id: `f46d6590-0fec-4df0-b31e-49dbf4b25476`
-- api token: configured in app defaults
+### 10.0 Current deployment defaults
+The current app build includes the Worker endpoint plus the non-secret Cloudflare account/database IDs, but it intentionally does **not** include a default API token. If direct D1 fallback is needed, enter a freshly generated token through **Admin → Website → Cloud Sync Credentials** and click **Save & Verify** on that browser only.
 
-If you need to rotate credentials later, use **Admin → Website → Cloud Sync Credentials** and click **Save & Verify**.
+If an API token was pasted into chat, logs, client code, screenshots, or docs, revoke it immediately and create a new one before testing again.
 
 ### 10.1 One-time prerequisites
 1. Create/confirm a D1 database in Cloudflare.
@@ -302,6 +299,25 @@ If `updated_at` changes after you edit data, sync is working.
 Common reasons and fixes:
 - **Missing localStorage credentials on one device** → set all 3 keys and reload.
 - **Wrong Account ID / DB ID / API token** → check first error shown in Sync status and re-enter values.
+- **Token was exposed** → revoke it in Cloudflare, create a new least-privilege token, update only GitHub Actions secrets or the private in-app admin fallback, then redeploy.
 - **Token lacks D1 permission** → regenerate token with D1 query/write permission.
 - **Different app URLs/environments** (staging vs production) → ensure both devices open the same deployment.
 - **No visible instant change** → expected; background polling interval is 15 seconds.
+
+## 11) Recover a GitHub Pages site after accidentally renaming the repository
+
+A repository rename changes the default project Pages URL path. For this repo, the expected Pages URL is:
+
+```text
+https://simpson2002-hke.github.io/Travel-Planner-pro/
+```
+
+If you renamed the repository and then renamed it back, use this checklist:
+
+1. GitHub repository → **Settings** → **Pages**. Confirm the site is deployed from **GitHub Actions**.
+2. GitHub repository → **Actions** → run **Deploy to GitHub Pages** manually, or push a commit to `main`.
+3. Wait for the workflow to finish, then open the exact URL with the trailing slash: `https://simpson2002-hke.github.io/Travel-Planner-pro/`.
+4. If the repository name changes again, either rename it back to `Travel-Planner-pro` or set `VITE_BASE_PATH` in the Pages workflow/repository variables to the new path, for example `/new-repo-name/`.
+5. If the old URL still 404s after a successful deploy, clear the browser cache and confirm the repository is public or that GitHub Pages is enabled for private repositories on your plan.
+
+The Vite config now derives the GitHub Pages base path from `GITHUB_REPOSITORY` during GitHub Actions builds, with `VITE_BASE_PATH` available as an explicit override.

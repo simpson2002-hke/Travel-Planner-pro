@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_PAGES: "true"
-      VITE_CLOUD_WORKER_ENDPOINT: ${{ vars.CLOUDFLARE_WORKER_ENDPOINT || 'https://travel-planner-ai-storage.simpsonlee71.workers.dev' }}
+      VITE_CLOUDFLARE_WORKER_ENDPOINT: ${{ vars.CLOUDFLARE_WORKER_ENDPOINT || 'https://travel-planner-ai-storage.simpsonlee71.workers.dev' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
