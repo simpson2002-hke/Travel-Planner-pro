@@ -9,22 +9,15 @@ function printJson(label, value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
-async function post(action, extra = {}) {
-  const url = new URL(endpoint);
-  url.searchParams.set('_tpv', String(Date.now()));
-  url.searchParams.set('_', String(Date.now()));
+function encodeUrlPayload(payload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'text/plain;charset=UTF-8',
-      'cache-control': 'no-cache',
-      'pragma': 'no-cache',
-    },
-    body: JSON.stringify({ id: action, action, ...extra }),
-    signal: AbortSignal.timeout(15_000),
-  });
-
+async function parseWorkerResponse(response) {
   const text = await response.text();
   let json;
   try {
@@ -38,6 +31,39 @@ async function post(action, extra = {}) {
   }
 
   return { status: response.status, json };
+}
+
+async function post(action, extra = {}) {
+  const url = new URL(endpoint);
+  url.searchParams.set('_tpv', String(Date.now()));
+  url.searchParams.set('_', String(Date.now()));
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'text/plain;charset=UTF-8',
+      'cache-control': 'no-cache',
+      pragma: 'no-cache',
+    },
+    body: JSON.stringify({ id: action, action, ...extra }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  return parseWorkerResponse(response);
+}
+
+async function getTunnel(action, extra = {}) {
+  const url = new URL(endpoint);
+  url.searchParams.set('_tpv', String(Date.now()));
+  url.searchParams.set('_', String(Date.now()));
+  url.searchParams.set('payload', encodeUrlPayload({ id: action, action, ...extra }));
+
+  const response = await fetch(url, {
+    method: 'GET',
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  return parseWorkerResponse(response);
 }
 
 function printNetworkHelp(error) {
@@ -64,12 +90,13 @@ function printNetworkHelp(error) {
     console.error('\nA CONNECT-blocking proxy commonly causes curl failures such as `response 403` for `workers.dev`.');
     console.error('If you are running locally, try one of these options:');
     console.error(`1. Bypass the proxy for Cloudflare: NO_PROXY=.workers.dev,workers.dev curl --noproxy '*' -4 -X POST '${endpoint}' -H 'content-type: text/plain;charset=UTF-8' --data '{"id":"set","action":"set","key":"${key}","value":{"ok":true}}'`);
-    console.error(`2. Run this verifier from a normal network connection: npm run verify:cloudflare -- '${endpoint}'`);
+    console.error(`2. Try the GET tunnel fallback: curl -sS '${endpoint}?payload=${encodeUrlPayload({ id: 'set', action: 'set', key, value: { ok: true } })}'`);
+    console.error(`3. Run this verifier from a normal network connection: npm run verify:cloudflare -- '${endpoint}'`);
   }
 
   console.error('\nBrowser fallback:');
   console.error(`Open ${endpoint} in a browser-enabled environment and run:`);
-  console.error(`fetch('${endpoint}?_=' + Date.now(), { method: 'POST', cache: 'no-store', headers: { 'content-type': 'text/plain;charset=UTF-8', 'cache-control': 'no-cache', 'pragma': 'no-cache' }, body: JSON.stringify({ id: 'set', action: 'set', key: '${key}', value: { ok: true } }) }).then(r => r.json()).then(console.log)`);
+  console.error(`fetch('${endpoint}?_=' + Date.now() + '&payload=${encodeUrlPayload({ id: 'set', action: 'set', key, value: { ok: true } })}', { method: 'GET', cache: 'no-store' }).then(r => r.json()).then(console.log)`);
 }
 
 async function main() {
@@ -79,10 +106,22 @@ async function main() {
   const records = await dns.lookup(new URL(endpoint).hostname, { all: true });
   printJson('Resolved DNS records', records);
 
-  const setResult = await post('set', { key, value: { ok: true } });
+  let setResult;
+  try {
+    setResult = await post('set', { key, value: { ok: true } });
+  } catch (error) {
+    console.warn(`POST set failed (${error?.message || error}); retrying with GET tunnel fallback...`);
+    setResult = await getTunnel('set', { key, value: { ok: true } });
+  }
   printJson('Set response', setResult);
 
-  const getResult = await post('get', { key });
+  let getResult;
+  try {
+    getResult = await post('get', { key });
+  } catch (error) {
+    console.warn(`POST get failed (${error?.message || error}); retrying with GET tunnel fallback...`);
+    getResult = await getTunnel('get', { key });
+  }
   printJson('Get response', getResult);
 
   const data = getResult.json?.data;

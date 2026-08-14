@@ -766,6 +766,27 @@ async function parseCloudWorkerResponse(response:Response){
   }
 }
 
+const CLOUD_WORKER_GET_TUNNEL_MAX_URL_LENGTH = 14000;
+
+function encodeCloudWorkerUrlPayload(payload:{id:string;action:string;key?:string;value?:unknown}){
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for(const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
+}
+
+function buildCloudWorkerGetTunnelUrl(endpoint:string,payload:{id:string;action:string;key?:string;value?:unknown}){
+  const url = new URL(endpoint);
+  url.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
+  url.searchParams.set("_",String(Date.now()));
+  url.searchParams.set("payload",encodeCloudWorkerUrlPayload(payload));
+  if(url.toString().length > CLOUD_WORKER_GET_TUNNEL_MAX_URL_LENGTH){
+    throw new Error("Cloud worker GET fallback payload is too large for a safe URL retry.");
+  }
+  return url;
+}
+
 async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key?:string;value?:unknown}){
   const requestEndpoint = new URL(endpoint);
   requestEndpoint.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
@@ -787,22 +808,20 @@ async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action
     });
     return { response, payload: await parseCloudWorkerResponse(response) };
   }catch(postError){
-    if(payload.action!=="get") throw postError;
-
-    const url = new URL(endpoint);
-    url.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
-    url.searchParams.set("_",String(Date.now()));
-    url.searchParams.set("id",payload.id);
-    url.searchParams.set("action",payload.action);
-    url.searchParams.set("key",payload.key);
-    const response = await fetch(url.toString(),{
-      method:"GET",
-      mode:"cors",
-      credentials:"omit",
-      cache:"no-store",
-      referrerPolicy:"no-referrer",
-    });
-    return { response, payload: await parseCloudWorkerResponse(response) };
+    try{
+      const url = buildCloudWorkerGetTunnelUrl(endpoint,payload);
+      const response = await fetch(url.toString(),{
+        method:"GET",
+        mode:"cors",
+        credentials:"omit",
+        cache:"no-store",
+        referrerPolicy:"no-referrer",
+      });
+      return { response, payload: await parseCloudWorkerResponse(response) };
+    }catch(getError){
+      if(payload.action==="get") throw getError;
+      throw postError;
+    }
   }
 }
 
