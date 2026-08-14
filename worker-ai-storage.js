@@ -12,6 +12,7 @@ const DEFAULT_CORS_HEADERS = {
   'access-control-allow-headers': 'content-type, authorization, x-requested-with',
   'access-control-max-age': '86400',
   'access-control-expose-headers': 'access-control-allow-origin, access-control-allow-methods, access-control-allow-headers, access-control-max-age, cache-control',
+  'access-control-allow-private-network': 'true',
   'cache-control': 'no-store',
 };
 
@@ -193,11 +194,14 @@ function createD1Adapter(db) {
   };
 }
 
-function pickStorage(env) {
+function pickStorage(env, options = {}) {
   const bindingSource = env ?? globalThis;
 
   if (bindingSource?.AI_STORAGE_DB && typeof bindingSource.AI_STORAGE_DB.prepare === 'function') {
     return createD1Adapter(bindingSource.AI_STORAGE_DB);
+  }
+  if (options.requirePersistent) {
+    throw new Error('Persistent D1 binding AI_STORAGE_DB is missing. Refusing to create an isolated temporary server.');
   }
   return createMemoryAdapter(memoryStore);
 }
@@ -312,7 +316,7 @@ async function handleFetch(request, env) {
   if (request.method === 'GET') {
     payload = payloadFromGetRequest(request);
     if (!payload) {
-      return jsonResponse({ ok: true, data: { status: 'ready' } }, 200, request);
+      return jsonResponse({ ok: true, data: { status: 'ready', storage: env?.AI_STORAGE_DB ? 'd1' : 'missing-d1' } }, 200, request);
     }
   } else if (request.method === 'POST') {
     try {
@@ -324,7 +328,12 @@ async function handleFetch(request, env) {
     return jsonResponse({ ok: false, error: 'Use POST with JSON body, or GET with ?payload=...' }, 405, request);
   }
 
-  const storage = pickStorage(env);
+  let storage;
+  try {
+    storage = pickStorage(env, { requirePersistent: true });
+  } catch (error) {
+    return jsonResponse({ ok: false, error: error instanceof Error ? error.message : 'Persistent storage unavailable' }, 503, request);
+  }
   const responsePayload = await toResult(payload, storage);
   return jsonResponse(responsePayload, responsePayload.ok ? 200 : 400, request);
 }
