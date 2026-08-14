@@ -675,16 +675,50 @@ async function verifyCloudD1Config(config:CloudD1Config){
   await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
+async function parseCloudWorkerResponse(response:Response){
+  const text = await response.text();
+  try{
+    return text ? JSON.parse(text) : {};
+  }catch{
+    throw new Error(`Cloud worker returned non-JSON response (${response.status}): ${text.slice(0,120)}`);
+  }
+}
+
+async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key:string;value?:unknown}){
+  try{
+    const response = await fetch(endpoint,{
+      method:"POST",
+      mode:"cors",
+      credentials:"omit",
+      cache:"no-store",
+      referrerPolicy:"no-referrer",
+      headers:{"content-type":"text/plain;charset=UTF-8"},
+      body:JSON.stringify(payload),
+    });
+    return { response, payload: await parseCloudWorkerResponse(response) };
+  }catch(postError){
+    if(payload.action!=="get") throw postError;
+
+    const url = new URL(endpoint);
+    url.searchParams.set("id",payload.id);
+    url.searchParams.set("action",payload.action);
+    url.searchParams.set("key",payload.key);
+    const response = await fetch(url.toString(),{
+      method:"GET",
+      mode:"cors",
+      credentials:"omit",
+      cache:"no-store",
+      referrerPolicy:"no-referrer",
+    });
+    return { response, payload: await parseCloudWorkerResponse(response) };
+  }
+}
+
 async function verifyCloudWorkerEndpoint(endpointOverride?:string){
   const endpoint = endpointOverride?.trim() || getCloudWorkerEndpoint();
   if(!endpoint) throw new Error("Cloud worker endpoint missing.");
   try{
-    const response = await fetch(endpoint,{
-      method:"POST",
-      headers:{"content-type":"application/json"},
-      body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
-    });
-    const payload = await response.json();
+    const { response, payload } = await fetchCloudWorkerPayload(endpoint,{ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" });
     if(!response.ok || payload?.ok !== true){
       throw new Error(payload?.error ?? `Cloud worker request failed (${response.status})`);
     }
@@ -692,7 +726,7 @@ async function verifyCloudWorkerEndpoint(endpointOverride?:string){
     const rawMessage = error instanceof Error ? error.message : "Unknown worker request error.";
     throw new Error(
       `Worker verification failed for ${endpoint}. ${rawMessage} `+
-      "If this says 'Failed to fetch', check CORS allow-origin/headers, HTTPS certificate, and that the Worker route is publicly reachable."
+      "If this says 'Failed to fetch' or 'Load failed', check CORS allow-origin/headers, HTTPS certificate, content blockers, and that the Worker route is publicly reachable."
     );
   }
 }
@@ -705,12 +739,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
   for(const candidate of workerEndpoints){
     const workerEndpoint = candidate.endpoint;
     try{
-      const resp = await fetch(workerEndpoint,{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:JSON.stringify({ id:crypto.randomUUID(), action, key, value }),
-      });
-      const payload = await resp.json();
+      const { response: resp, payload } = await fetchCloudWorkerPayload(workerEndpoint,{ id:crypto.randomUUID(), action, key, value });
       if(!resp.ok || payload?.ok !== true){
         throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
       }

@@ -269,24 +269,42 @@ if (typeof workerGlobal.addEventListener === 'function') {
   });
 }
 
+function payloadFromGetRequest(request) {
+  const url = new URL(request.url);
+  const action = url.searchParams.get('action');
+  const key = url.searchParams.get('key');
+  const id = url.searchParams.get('id') || crypto.randomUUID();
+
+  if (!action) return null;
+  return { id, action, key };
+}
+
 async function handleFetch(request, env) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
-  if (request.method === 'GET' || request.method === 'HEAD') {
+  if (request.method === 'HEAD') {
     return jsonResponse({ ok: true, data: { status: 'ready' } }, 200, request);
   }
 
-  if (request.method !== 'POST') {
-    return jsonResponse({ ok: false, error: 'Use POST with JSON body: { id, action, key?, value?, entries? }' }, 405, request);
-  }
-
   let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400, request);
+  if (request.method === 'GET') {
+    payload = payloadFromGetRequest(request);
+    if (!payload) {
+      return jsonResponse({ ok: true, data: { status: 'ready' } }, 200, request);
+    }
+    if (payload.action !== 'get' && payload.action !== 'has' && payload.action !== 'keys' && payload.action !== 'values' && payload.action !== 'entries') {
+      return jsonResponse({ ok: false, error: 'GET only supports read-only actions.' }, 405, request);
+    }
+  } else if (request.method === 'POST') {
+    try {
+      payload = await request.json();
+    } catch {
+      return jsonResponse({ ok: false, error: 'Invalid JSON body' }, 400, request);
+    }
+  } else {
+    return jsonResponse({ ok: false, error: 'Use POST with JSON body, or GET with ?action=get&key=...' }, 405, request);
   }
 
   const storage = pickStorage(env);
