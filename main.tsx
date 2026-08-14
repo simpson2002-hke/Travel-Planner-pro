@@ -766,7 +766,7 @@ async function parseCloudWorkerResponse(response:Response){
   }
 }
 
-async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key:string;value?:unknown}){
+async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key?:string;value?:unknown}){
   const requestEndpoint = new URL(endpoint);
   requestEndpoint.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
   requestEndpoint.searchParams.set("_",String(Date.now()));
@@ -5317,17 +5317,25 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     setMsg("");
 
     try{
-      const optionsResp = await fetch(endpoint,{ method:"OPTIONS" });
+      const optionsUrl = new URL(endpoint);
+      optionsUrl.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
+      optionsUrl.searchParams.set("_",String(Date.now()));
+      const optionsResp = await fetch(optionsUrl.toString(),{
+        method:"OPTIONS",
+        mode:"cors",
+        credentials:"omit",
+        cache:"no-store",
+        referrerPolicy:"no-referrer",
+      });
       const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
       const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
       const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
 
-      const postResp = await fetch(endpoint,{
-        method:"POST",
-        headers:{"content-type":"application/json"},
-        body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" }),
+      const { response: postResp, payload: postPayload } = await fetchCloudWorkerPayload(endpoint,{
+        id:crypto.randomUUID(),
+        action:"get",
+        key:"tp-sync-healthcheck",
       });
-      const postPayload = await postResp.json();
 
       if(!postResp.ok || postPayload?.ok !== true){
         throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
@@ -5349,22 +5357,21 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       const endpoint = workerEndpoint.trim();
       if(endpoint){
         const testKey = `tp-d1-self-test-${Date.now()}`;
-        const setResp = await fetch(endpoint,{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({ id:crypto.randomUUID(), action:"set", key:testKey, value:{ ok:true, t:Date.now() } }),
+        const { response: setResp, payload: setPayload } = await fetchCloudWorkerPayload(endpoint,{
+          id:crypto.randomUUID(),
+          action:"set",
+          key:testKey,
+          value:{ ok:true, t:Date.now() },
         });
-        const setPayload = await setResp.json();
         if(!setResp.ok || setPayload?.ok !== true){
           throw new Error(setPayload?.error ?? `Worker D1 set test failed (${setResp.status})`);
         }
 
-        const getResp = await fetch(endpoint,{
-          method:"POST",
-          headers:{"content-type":"application/json"},
-          body:JSON.stringify({ id:crypto.randomUUID(), action:"get", key:testKey }),
+        const { response: getResp, payload: getPayload } = await fetchCloudWorkerPayload(endpoint,{
+          id:crypto.randomUUID(),
+          action:"get",
+          key:testKey,
         });
-        const getPayload = await getResp.json();
         const data = getPayload?.data;
         if(!getResp.ok || getPayload?.ok !== true || data?.exists !== true){
           throw new Error(getPayload?.error ?? `Worker D1 get test failed (${getResp.status})`);
