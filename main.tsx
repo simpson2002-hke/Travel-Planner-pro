@@ -197,6 +197,11 @@ const SK = {
   site:"tp-site-settings", lang:"tp-lang", desktopLayout:"tp-desktop-layout",
 };
 
+const APP_CACHE_SCHEMA_VERSION = "2026-08-14-ios-login-fetch-v2";
+const APP_CACHE_VERSION_KEY = "tp-app-cache-version";
+const APP_LAST_ACTIVE_KEY = "tp-last-active-at";
+const APP_IDLE_RESET_MS = 1000 * 60 * 60 * 24 * 2;
+
 const HERO_IMAGES = [
   "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1600&q=80",
   "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1600&q=80",
@@ -475,6 +480,66 @@ function tripCountdownLabel(startDate:string, endDate:string, t?:(k:TKey)=>strin
   return t ? t("endedDaysAgo").replace("{count}",String(daysAgo)) : "Completed";
 }
 
+function clearTransientAppState(reason:"version-change"|"idle"|"close"|"manual" = "manual"){
+  if(typeof window === "undefined") return;
+  try{
+    sessionStorage.clear();
+  }catch{}
+
+  try{
+    if(reason === "version-change" || reason === "idle"){
+      localStorage.removeItem(SK.userId);
+      localStorage.removeItem(SK.adminAuth);
+      localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
+    }
+  }catch{}
+
+  if("caches" in window){
+    window.caches.keys()
+      .then(keys=>Promise.all(keys.map(key=>window.caches.delete(key))))
+      .catch(()=>{});
+  }
+}
+
+function prepareBrowserCacheForAppVersion(){
+  if(typeof window === "undefined") return;
+  try{
+    const previousVersion = localStorage.getItem(APP_CACHE_VERSION_KEY);
+    const lastActiveRaw = localStorage.getItem(APP_LAST_ACTIVE_KEY);
+    const lastActive = lastActiveRaw ? Number(lastActiveRaw) : 0;
+    const now = Date.now();
+    if(previousVersion !== APP_CACHE_SCHEMA_VERSION){
+      clearTransientAppState("version-change");
+      localStorage.setItem(APP_CACHE_VERSION_KEY,APP_CACHE_SCHEMA_VERSION);
+    }else if(lastActive > 0 && now - lastActive > APP_IDLE_RESET_MS){
+      clearTransientAppState("idle");
+    }
+    localStorage.setItem(APP_LAST_ACTIVE_KEY,String(now));
+  }catch{}
+}
+
+function useTransientCacheCleanup(){
+  useEffect(()=>{
+    if(typeof window === "undefined") return;
+    const markActive = ()=>{
+      try{localStorage.setItem(APP_LAST_ACTIVE_KEY,String(Date.now()));}catch{}
+    };
+    const handlePageHide = ()=>{
+      clearTransientAppState("close");
+      markActive();
+    };
+    const handleVisibility = ()=>{
+      if(document.visibilityState === "hidden") markActive();
+    };
+    window.addEventListener("pagehide",handlePageHide);
+    document.addEventListener("visibilitychange",handleVisibility);
+    return ()=>{
+      window.removeEventListener("pagehide",handlePageHide);
+      document.removeEventListener("visibilitychange",handleVisibility);
+    };
+  },[]);
+}
+
 function usePersist<T>(key:string,init:T){
   const [s,setState]=useState<T>(()=>{try{const r=localStorage.getItem(key);return r?JSON.parse(r):init;}catch{return init;}});
   const set = useCallback((next:SetStateAction<T>)=>{
@@ -702,14 +767,22 @@ async function parseCloudWorkerResponse(response:Response){
 }
 
 async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key:string;value?:unknown}){
+  const requestEndpoint = new URL(endpoint);
+  requestEndpoint.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
+  requestEndpoint.searchParams.set("_",String(Date.now()));
+
   try{
-    const response = await fetch(endpoint,{
+    const response = await fetch(requestEndpoint.toString(),{
       method:"POST",
       mode:"cors",
       credentials:"omit",
       cache:"no-store",
       referrerPolicy:"no-referrer",
-      headers:{"content-type":"text/plain;charset=UTF-8"},
+      headers:{
+        "content-type":"text/plain;charset=UTF-8",
+        "cache-control":"no-cache",
+        "pragma":"no-cache",
+      },
       body:JSON.stringify(payload),
     });
     return { response, payload: await parseCloudWorkerResponse(response) };
@@ -717,6 +790,8 @@ async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action
     if(payload.action!=="get") throw postError;
 
     const url = new URL(endpoint);
+    url.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
+    url.searchParams.set("_",String(Date.now()));
     url.searchParams.set("id",payload.id);
     url.searchParams.set("action",payload.action);
     url.searchParams.set("key",payload.key);
@@ -5361,6 +5436,7 @@ function AdminPasswordForm({th,t,onSave}:{th:ThemeMode;t:(k:TKey)=>string;onSave
    APP ROOT
    ═══════════════════════════════════════════════════════════════════════════════ */
 export function App(){
+  useTransientCacheCleanup();
   const [theme,setTheme]=usePersist<ThemeMode>(SK.theme,"dark");
   const [lang,setLang]=usePersist<Language>(SK.lang,"en");
   const [desktopLayout,setDesktopLayout]=usePersist<boolean>(SK.desktopLayout,false);
@@ -5665,6 +5741,8 @@ export function App(){
       onSignIn={handleSignIn} onSignUp={handleSignUp} onToggle={()=>setAuthMode(m=>m==="signin"?"signup":"signin")}/>
   </div>;
 }
+
+prepareBrowserCacheForAppVersion();
 
 const rootEl = document.getElementById("root");
 
