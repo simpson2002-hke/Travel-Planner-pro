@@ -10,9 +10,17 @@ function printJson(label, value) {
 }
 
 async function post(action, extra = {}) {
-  const response = await fetch(endpoint, {
+  const url = new URL(endpoint);
+  url.searchParams.set('_tpv', String(Date.now()));
+  url.searchParams.set('_', String(Date.now()));
+
+  const response = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'text/plain;charset=UTF-8',
+      'cache-control': 'no-cache',
+      'pragma': 'no-cache',
+    },
     body: JSON.stringify({ id: action, action, ...extra }),
     signal: AbortSignal.timeout(15_000),
   });
@@ -55,13 +63,13 @@ function printNetworkHelp(error) {
     }
     console.error('\nA CONNECT-blocking proxy commonly causes curl failures such as `response 403` for `workers.dev`.');
     console.error('If you are running locally, try one of these options:');
-    console.error(`1. Bypass the proxy for Cloudflare: NO_PROXY=.workers.dev,workers.dev curl --noproxy '*' -4 -X POST '${endpoint}' -H 'content-type: application/json' --data '{"id":"set","action":"set","key":"${key}","value":{"ok":true}}'`);
+    console.error(`1. Bypass the proxy for Cloudflare: NO_PROXY=.workers.dev,workers.dev curl --noproxy '*' -4 -X POST '${endpoint}' -H 'content-type: text/plain;charset=UTF-8' --data '{"id":"set","action":"set","key":"${key}","value":{"ok":true}}'`);
     console.error(`2. Run this verifier from a normal network connection: npm run verify:cloudflare -- '${endpoint}'`);
   }
 
   console.error('\nBrowser fallback:');
   console.error(`Open ${endpoint} in a browser-enabled environment and run:`);
-  console.error(`fetch('${endpoint}', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'set', action: 'set', key: '${key}', value: { ok: true } }) }).then(r => r.json()).then(console.log)`);
+  console.error(`fetch('${endpoint}?_=' + Date.now(), { method: 'POST', cache: 'no-store', headers: { 'content-type': 'text/plain;charset=UTF-8', 'cache-control': 'no-cache', 'pragma': 'no-cache' }, body: JSON.stringify({ id: 'set', action: 'set', key: '${key}', value: { ok: true } }) }).then(r => r.json()).then(console.log)`);
 }
 
 async function main() {

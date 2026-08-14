@@ -11,6 +11,8 @@ const DEFAULT_CORS_HEADERS = {
   'access-control-allow-methods': 'GET, POST, OPTIONS',
   'access-control-allow-headers': 'content-type, authorization, x-requested-with',
   'access-control-max-age': '86400',
+  'access-control-expose-headers': 'access-control-allow-origin, access-control-allow-methods, access-control-allow-headers, access-control-max-age, cache-control',
+  'cache-control': 'no-store',
 };
 
 function corsHeaders(request) {
