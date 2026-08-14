@@ -585,12 +585,29 @@ function setCloudD1Config(config:CloudD1Config){
   localStorage.setItem(CLOUD_CF_API_TOKEN_KEY,config.apiToken.trim());
 }
 
+function normalizeCloudWorkerEndpoint(rawEndpoint:string | undefined | null){
+  const raw = rawEndpoint?.trim() ?? "";
+  if(!raw) return "";
+
+  const extractedUrl = raw.match(/https?:\/\/[^\s\\\])}>'"]+/i)?.[0] ?? raw;
+  try{
+    const url = new URL(extractedUrl);
+    if(url.protocol!=="https:" && url.protocol!=="http:") return "";
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/,"/") || "/";
+    return url.toString();
+  }catch{
+    return "";
+  }
+}
+
 function getCloudWorkerEndpoint(){
   try{
-    const override = localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY)?.trim();
-    return override || DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+    const override = normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
+    return override || normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
   }catch{
-    return DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT;
+    return normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
   }
 }
 
@@ -598,15 +615,15 @@ function getCloudWorkerEndpointCandidates(){
   const candidates: { endpoint: string; source: "override" | "deployed-default" }[] = [];
   const seen = new Set<string>();
 
-  const addCandidate = (endpoint: string | undefined, source: "override" | "deployed-default")=>{
-    const next = endpoint?.trim();
+  const addCandidate = (endpoint: string | undefined | null, source: "override" | "deployed-default")=>{
+    const next = normalizeCloudWorkerEndpoint(endpoint);
     if(!next || seen.has(next)) return;
     seen.add(next);
     candidates.push({ endpoint: next, source });
   };
 
   try{
-    addCandidate(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY) ?? "", "override");
+    addCandidate(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY), "override");
   }catch{}
 
   addCandidate(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT, "deployed-default");
@@ -614,7 +631,7 @@ function getCloudWorkerEndpointCandidates(){
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
-  const next = endpoint.trim();
+  const next = normalizeCloudWorkerEndpoint(endpoint);
   if(next){
     localStorage.setItem(CLOUD_WORKER_ENDPOINT_KEY,next);
     return;
@@ -715,7 +732,7 @@ async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action
 }
 
 async function verifyCloudWorkerEndpoint(endpointOverride?:string){
-  const endpoint = endpointOverride?.trim() || getCloudWorkerEndpoint();
+  const endpoint = normalizeCloudWorkerEndpoint(endpointOverride) || getCloudWorkerEndpoint();
   if(!endpoint) throw new Error("Cloud worker endpoint missing.");
   try{
     const { response, payload } = await fetchCloudWorkerPayload(endpoint,{ id:crypto.randomUUID(), action:"get", key:"tp-sync-healthcheck" });
@@ -795,7 +812,7 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
     throw new Error(`Unsupported cloud storage action: ${action}`);
   }
 
-  const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[0]}` : "";
+  const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[workerErrors.length-1]}` : "";
   if(workerEndpoints.length>0){
     throw new Error(`Cloud sync failed in Worker mode.${workerMessage}`);
   }
