@@ -623,6 +623,10 @@ const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
 const CLOUD_EDITOR_PRIORITY_MS = 120000;
 const CANONICAL_CLOUD_WORKER_ENDPOINT = normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT_ALIASES ?? "")
+  .split(",")
+  .map((endpoint:string)=>normalizeCloudWorkerEndpoint(endpoint))
+  .filter(Boolean);
 
 type CloudD1Config = {
   accountId: string;
@@ -668,32 +672,39 @@ function normalizeCloudWorkerEndpoint(rawEndpoint:string | undefined | null){
   }
 }
 
-function clearNonCanonicalCloudWorkerEndpointOverride(){
+function getStoredCloudWorkerEndpointOverride(){
   try{
-    const override = normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
-    if(override && override !== CANONICAL_CLOUD_WORKER_ENDPOINT){
-      localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
-      return true;
-    }
-  }catch{}
-  return false;
+    return normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
+  }catch{
+    return "";
+  }
 }
 
 function getCloudWorkerEndpoint(){
-  clearNonCanonicalCloudWorkerEndpointOverride();
-  return CANONICAL_CLOUD_WORKER_ENDPOINT;
+  return getStoredCloudWorkerEndpointOverride() || CANONICAL_CLOUD_WORKER_ENDPOINT;
 }
 
 function getCloudWorkerEndpointCandidates(){
-  clearNonCanonicalCloudWorkerEndpointOverride();
-  return CANONICAL_CLOUD_WORKER_ENDPOINT ? [{ endpoint: CANONICAL_CLOUD_WORKER_ENDPOINT, source: "canonical" as const }] : [];
+  const candidates: { endpoint: string; source: "saved-access-url" | "deployed-alias" | "canonical-workers-dev" }[] = [];
+  const seen = new Set<string>();
+  const addCandidate = (endpoint:string,source:typeof candidates[number]["source"])=>{
+    const next = normalizeCloudWorkerEndpoint(endpoint);
+    if(!next || seen.has(next)) return;
+    seen.add(next);
+    candidates.push({ endpoint: next, source });
+  };
+
+  addCandidate(getStoredCloudWorkerEndpointOverride(),"saved-access-url");
+  for(const alias of DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES) addCandidate(alias,"deployed-alias");
+  addCandidate(CANONICAL_CLOUD_WORKER_ENDPOINT,"canonical-workers-dev");
+  return candidates;
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
   const next = normalizeCloudWorkerEndpoint(endpoint);
   if(next && next !== CANONICAL_CLOUD_WORKER_ENDPOINT){
-    localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
-    throw new Error(`Only the canonical shared Worker endpoint is allowed: ${CANONICAL_CLOUD_WORKER_ENDPOINT}`);
+    localStorage.setItem(CLOUD_WORKER_ENDPOINT_KEY,next);
+    return;
   }
   localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
 }
@@ -853,41 +864,6 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
         `Worker fetch failed for ${workerEndpoint}: ${rawMessage}. `+
         "If this says 'Failed to fetch', verify Worker CORS headers and that the endpoint is reachable from the browser."
       );
-    }
-  }
-
-  const config = getCloudD1Config();
-  const canUseDirectD1Fallback = false && workerEndpoints.length===0 && config.accountId && config.databaseId && config.apiToken;
-  if(canUseDirectD1Fallback){
-    await ensureCloudD1Schema(config);
-
-    if(action==="set"){
-      const now = new Date().toISOString();
-      await cloudD1Query(
-        config,
-        `INSERT INTO ai_storage (storage_key, storage_value, updated_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(storage_key) DO UPDATE SET storage_value=excluded.storage_value, updated_at=excluded.updated_at`,
-        [key, JSON.stringify(value), now]
-      );
-      return { key, value };
-    }
-
-    if(action==="get"){
-      const result = await cloudD1Query(
-        config,
-        "SELECT storage_value FROM ai_storage WHERE storage_key = ?1 LIMIT 1",
-        [key]
-      );
-      const row = result?.results?.[0] as { storage_value?: string } | undefined;
-      if(!row || typeof row.storage_value !== "string"){
-        return { key, value: undefined, exists: false };
-      }
-      try{
-        return { key, value: JSON.parse(row.storage_value), exists: true };
-      }catch{
-        return { key, value: row.storage_value, exists: true };
-      }
     }
   }
 
@@ -5298,7 +5274,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       const endpoint = getCloudWorkerEndpoint();
       await verifyCloudWorkerEndpoint(endpoint);
       setWorkerEndpoint(endpoint);
-      setMsg("✅ Canonical Worker endpoint reachable. All devices will sync through this single shared server; D1 credentials are only kept for private diagnostics.");
+      setMsg("✅ Worker access URL reachable. Sync still uses the same shared Worker/D1 backend; use a custom domain here only when workers.dev is blocked on this network.");
       if(onSaved) await onSaved();
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
@@ -5393,16 +5369,16 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   const resetWorkerEndpointToDefault = ()=>{
     setCloudWorkerEndpoint("");
     setWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
-    setMsg("Using deployed default worker endpoint on this device.");
+    setMsg("Using the default workers.dev endpoint on this device.");
     setErr("");
   };
 
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      This build uses one canonical Cloudflare Worker endpoint for every device. Stale per-device endpoint overrides are ignored and cleared automatically so everyone reaches the same D1-backed trip store. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
+      Sync uses one Cloudflare Worker backed by one D1 database. If workers.dev is blocked without VPN, enter a custom domain or route that points to this same Worker; do not enter a different Worker connected to a different D1 database. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
     </p>
-    <Input th={th} label="Canonical Cloudflare Worker Endpoint" value={workerEndpoint} readOnly className="cursor-not-allowed opacity-80" placeholder="https://your-worker.workers.dev"/>
+    <Input th={th} label="Worker Access URL" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
     <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
     <Input th={th} label="Cloudflare D1 Database ID" value={databaseId} onChange={e=>setDatabaseId(e.target.value)}/>
     <Input th={th} label="Cloudflare API Token" type="password" value={apiToken} onChange={e=>setApiToken(e.target.value)}/>
@@ -5412,7 +5388,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Clear Endpoint Override</Btn>
+      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use workers.dev Default</Btn>
       <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
