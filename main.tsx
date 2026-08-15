@@ -622,6 +622,11 @@ const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN
 const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
 const CLOUD_EDITOR_PRIORITY_MS = 120000;
+const CANONICAL_CLOUD_WORKER_ENDPOINT = normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT_ALIASES ?? "")
+  .split(",")
+  .map((endpoint:string)=>normalizeCloudWorkerEndpoint(endpoint))
+  .filter(Boolean);
 
 type CloudD1Config = {
   accountId: string;
@@ -667,37 +672,37 @@ function normalizeCloudWorkerEndpoint(rawEndpoint:string | undefined | null){
   }
 }
 
-function getCloudWorkerEndpoint(){
+function getStoredCloudWorkerEndpointOverride(){
   try{
-    const override = normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
-    return override || normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+    return normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
   }catch{
-    return normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+    return "";
   }
 }
 
-function getCloudWorkerEndpointCandidates(){
-  const candidates: { endpoint: string; source: "override" | "deployed-default" }[] = [];
-  const seen = new Set<string>();
+function getCloudWorkerEndpoint(){
+  return getStoredCloudWorkerEndpointOverride() || CANONICAL_CLOUD_WORKER_ENDPOINT;
+}
 
-  const addCandidate = (endpoint: string | undefined | null, source: "override" | "deployed-default")=>{
+function getCloudWorkerEndpointCandidates(){
+  const candidates: { endpoint: string; source: "saved-access-url" | "deployed-alias" | "canonical-workers-dev" }[] = [];
+  const seen = new Set<string>();
+  const addCandidate = (endpoint:string,source:typeof candidates[number]["source"])=>{
     const next = normalizeCloudWorkerEndpoint(endpoint);
     if(!next || seen.has(next)) return;
     seen.add(next);
     candidates.push({ endpoint: next, source });
   };
 
-  try{
-    addCandidate(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY), "override");
-  }catch{}
-
-  addCandidate(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT, "deployed-default");
+  addCandidate(getStoredCloudWorkerEndpointOverride(),"saved-access-url");
+  for(const alias of DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES) addCandidate(alias,"deployed-alias");
+  addCandidate(CANONICAL_CLOUD_WORKER_ENDPOINT,"canonical-workers-dev");
   return candidates;
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
   const next = normalizeCloudWorkerEndpoint(endpoint);
-  if(next){
+  if(next && next !== CANONICAL_CLOUD_WORKER_ENDPOINT){
     localStorage.setItem(CLOUD_WORKER_ENDPOINT_KEY,next);
     return;
   }
@@ -845,17 +850,12 @@ async function verifyCloudWorkerEndpoint(endpointOverride?:string){
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
   const workerEndpoints = getCloudWorkerEndpointCandidates();
   const workerErrors: string[] = [];
-  const hasLocalOverride = workerEndpoints.some((item)=>item.source==="override");
-
   for(const candidate of workerEndpoints){
     const workerEndpoint = candidate.endpoint;
     try{
       const { response: resp, payload } = await fetchCloudWorkerPayload(workerEndpoint,{ id:crypto.randomUUID(), action, key, value });
       if(!resp.ok || payload?.ok !== true){
         throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
-      }
-      if(hasLocalOverride && candidate.source==="deployed-default"){
-        setCloudWorkerEndpoint("");
       }
       return payload?.data;
     }catch(error){
@@ -864,41 +864,6 @@ async function cloudStorageRequest(action:string,key:string,value?:unknown){
         `Worker fetch failed for ${workerEndpoint}: ${rawMessage}. `+
         "If this says 'Failed to fetch', verify Worker CORS headers and that the endpoint is reachable from the browser."
       );
-    }
-  }
-
-  const config = getCloudD1Config();
-  const canUseDirectD1Fallback = workerEndpoints.length===0 && config.accountId && config.databaseId && config.apiToken;
-  if(canUseDirectD1Fallback){
-    await ensureCloudD1Schema(config);
-
-    if(action==="set"){
-      const now = new Date().toISOString();
-      await cloudD1Query(
-        config,
-        `INSERT INTO ai_storage (storage_key, storage_value, updated_at)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(storage_key) DO UPDATE SET storage_value=excluded.storage_value, updated_at=excluded.updated_at`,
-        [key, JSON.stringify(value), now]
-      );
-      return { key, value };
-    }
-
-    if(action==="get"){
-      const result = await cloudD1Query(
-        config,
-        "SELECT storage_value FROM ai_storage WHERE storage_key = ?1 LIMIT 1",
-        [key]
-      );
-      const row = result?.results?.[0] as { storage_value?: string } | undefined;
-      if(!row || typeof row.storage_value !== "string"){
-        return { key, value: undefined, exists: false };
-      }
-      try{
-        return { key, value: JSON.parse(row.storage_value), exists: true };
-      }catch{
-        return { key, value: row.storage_value, exists: true };
-      }
     }
   }
 
@@ -5306,15 +5271,10 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     try{
       setCloudWorkerEndpoint(workerEndpoint);
       setCloudD1Config(nextConfig);
-      if(workerEndpoint.trim()){
-        await verifyCloudWorkerEndpoint(workerEndpoint);
-        setMsg("✅ Worker endpoint reachable. Sync is active; D1 credentials are optional and only used for direct fallback.");
-      }else if(nextConfig.accountId && nextConfig.databaseId && nextConfig.apiToken){
-        await verifyCloudD1Config(nextConfig);
-        setMsg("✅ Direct Cloudflare D1 API credentials verified. Use this mode only when Worker endpoint is not configured.");
-      }else{
-        throw new Error("Enter a Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 fallback.");
-      }
+      const endpoint = getCloudWorkerEndpoint();
+      await verifyCloudWorkerEndpoint(endpoint);
+      setWorkerEndpoint(endpoint);
+      setMsg("✅ Worker access URL reachable. Sync still uses the same shared Worker/D1 backend; use a custom domain here only when workers.dev is blocked on this network.");
       if(onSaved) await onSaved();
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
@@ -5324,7 +5284,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   };
 
   const runWorkerCorsSelfTest = async()=>{
-    const endpoint = workerEndpoint.trim();
+    const endpoint = getCloudWorkerEndpoint();
     if(!endpoint){
       setErr("Please enter a Worker endpoint first.");
       setMsg("");
@@ -5373,7 +5333,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     setErr("");
     setMsg("");
     try{
-      const endpoint = workerEndpoint.trim();
+      const endpoint = getCloudWorkerEndpoint();
       if(endpoint){
         const testKey = `tp-d1-self-test-${Date.now()}`;
         const { response: setResp, payload: setPayload } = await fetchCloudWorkerPayload(endpoint,{
@@ -5397,16 +5357,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
         }
         setMsg("✅ D1 schema/storage test passed via Worker endpoint (set/get succeeded).");
       }else{
-        const nextConfig: CloudD1Config = {
-          accountId: accountId.trim(),
-          databaseId: databaseId.trim(),
-          apiToken: apiToken.trim(),
-        };
-        if(!nextConfig.accountId || !nextConfig.databaseId || !nextConfig.apiToken){
-          throw new Error("Enter Worker endpoint, or provide Account ID + D1 Database ID + API Token for direct D1 test.");
-        }
-        await verifyCloudD1Config(nextConfig);
-        setMsg("✅ Direct D1 schema test passed (CREATE TABLE/INDEX + SELECT 1).");
+        throw new Error("Canonical Worker endpoint is missing from this build.");
       }
     }catch(error){
       setErr(error instanceof Error ? error.message : "D1 schema test failed.");
@@ -5418,16 +5369,16 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   const resetWorkerEndpointToDefault = ()=>{
     setCloudWorkerEndpoint("");
     setWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
-    setMsg("Using deployed default worker endpoint on this device.");
+    setMsg("Using the default workers.dev endpoint on this device.");
     setErr("");
   };
 
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      Preferred mode uses the Cloudflare Worker endpoint automatically. Optional D1 credentials below are only needed for direct D1 fallback.
+      Sync uses one Cloudflare Worker backed by one D1 database. If workers.dev is blocked without VPN, enter a custom domain or route that points to this same Worker; do not enter a different Worker connected to a different D1 database. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
     </p>
-    <Input th={th} label="Cloudflare Worker Endpoint" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder="https://your-worker.workers.dev"/>
+    <Input th={th} label="Worker Access URL" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
     <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
     <Input th={th} label="Cloudflare D1 Database ID" value={databaseId} onChange={e=>setDatabaseId(e.target.value)}/>
     <Input th={th} label="Cloudflare API Token" type="password" value={apiToken} onChange={e=>setApiToken(e.target.value)}/>
@@ -5437,7 +5388,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use Deployed Endpoint</Btn>
+      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use workers.dev Default</Btn>
       <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;

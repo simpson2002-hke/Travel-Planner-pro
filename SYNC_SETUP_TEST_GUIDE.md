@@ -133,3 +133,17 @@ For production users:
 1. Configure and verify Worker endpoint once in Admin.
 2. Keep D1 credentials blank on normal user devices.
 3. Let auto-sync handle updates; use manual buttons only for immediate refresh/troubleshooting.
+
+## workers.dev works on VPN but fails without VPN
+
+If the app shows `Worker verification failed ... Failed to fetch` only when the VPN is off, but the same Worker works through a VPN, the most likely cause is not a D1 schema problem. It usually means the local network, ISP, DNS resolver, browser extension, or security product cannot reach the `workers.dev` hostname from that location.
+
+Recommended fix while keeping one shared trip server:
+
+1. Keep the existing Cloudflare Worker and its existing `AI_STORAGE_DB` D1 binding. Do **not** create a second Worker or a second D1 database.
+2. Add a Cloudflare custom domain or Worker route that points to the same Worker script.
+3. Open **Admin → Website → Cloud Sync Credentials**.
+4. Enter the custom domain URL in **Worker Access URL** and click **Save & Verify**.
+5. Run **CORS Self-Test** and **D1 Schema Test** from the affected non-VPN network.
+
+The Worker access URL may be different, but it must route to the same Worker and D1 binding. That keeps all devices on one shared data store while avoiding networks that block `workers.dev`.
