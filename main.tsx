@@ -806,8 +806,6 @@ async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action
       referrerPolicy:"no-referrer",
       headers:{
         "content-type":"text/plain;charset=UTF-8",
-        "cache-control":"no-cache",
-        "pragma":"no-cache",
       },
       body:JSON.stringify(payload),
     });
