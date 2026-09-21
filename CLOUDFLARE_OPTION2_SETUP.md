@@ -203,6 +203,33 @@ This means the latest shared profiles, trips, admin password, and site settings 
 The GitHub Pages workflow now injects the Worker endpoint for the whole deployment using repository variable `CLOUDFLARE_WORKER_ENDPOINT` (falling back to the current default if the variable is unset). The current default endpoint is:
 - `https://travel-planner-ai-storage.simpsonlee71.workers.dev`
 
+### Production access URL: use a custom Worker domain
+
+`*.workers.dev` is a shared Cloudflare hostname. Some ISPs, enterprise DNS resolvers,
+and content filters block that hostname or its DNS answers. If the app works through a
+VPN but fails on ordinary Wi-Fi/mobile networks, that is a network reachability problem
+rather than a username/password or D1 problem. CORS headers cannot repair a DNS, TLS,
+or hostname block.
+
+For production, add a hostname you control in **Cloudflare → Workers & Pages →
+travel-planner-ai-storage → Settings → Domains & Routes** (for example,
+`sync.example.com`) and point it to this *same* Worker and D1 binding. Confirm that
+the hostname has an active Cloudflare Universal SSL certificate and does not redirect
+to another host. Then set these GitHub repository variables before redeploying Pages:
+
+- `CLOUDFLARE_WORKER_ENDPOINT=https://sync.example.com/`
+- `CLOUDFLARE_WORKER_ENDPOINT_ALIASES=https://travel-planner-ai-storage.simpsonlee71.workers.dev/`
+
+The primary URL is embedded in new builds; the optional alias lets the app retry the
+old endpoint during migration. Do not use a different Worker/database for the custom
+hostname, or accounts and trips will split across two storage backends.
+
+The browser transport intentionally uses a safelisted `Content-Type` and URL cache
+busting rather than request `Cache-Control`/`Pragma` headers. This keeps normal writes
+as a simple CORS request, avoiding an unnecessary `OPTIONS` preflight that restrictive
+networks commonly block. The Worker must still return CORS headers on **every**
+response, including `OPTIONS`, errors, and health checks.
+
 So opening `https://simpson2002-hke.github.io/Travel-Planner-pro/` should automatically attempt cloud sync with no per-device console setup.
 
 ### If you ever need to change the worker URL

@@ -42,8 +42,6 @@ async function post(action, extra = {}) {
     method: 'POST',
     headers: {
       'content-type': 'text/plain;charset=UTF-8',
-      'cache-control': 'no-cache',
-      pragma: 'no-cache',
     },
     body: JSON.stringify({ id: action, action, ...extra }),
     signal: AbortSignal.timeout(15_000),
