@@ -123,16 +123,16 @@ npm run verify:cloudflare -- 'https://travel-planner-ai-storage.simpsonlee71.wor
 
 If you prefer raw `curl`, use:
 ```bash
-curl -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev'   -H 'content-type: application/json'   --data '{"id":"1","action":"set","key":"d1-check","value":{"ok":true}}'
+curl -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev'   -H 'content-type: text/plain;charset=UTF-8'   --data '{"id":"1","action":"set","key":"d1-check","value":{"ok":true}}'
 
-curl -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev'   -H 'content-type: application/json'   --data '{"id":"2","action":"get","key":"d1-check"}'
+curl -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev'   -H 'content-type: text/plain;charset=UTF-8'   --data '{"id":"2","action":"get","key":"d1-check"}'
 ```
 You should see `"exists":true` on the second response.
 
 If `curl` fails with a proxy error such as `CONNECT tunnel failed, response 403`, the issue is usually your shell/network proxy rather than the Worker itself. In that case:
 
 ```bash
-NO_PROXY=.workers.dev,workers.dev curl --noproxy '*' -4 -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev' -H 'content-type: application/json' --data '{"id":"1","action":"set","key":"d1-check","value":{"ok":true}}'
+NO_PROXY=.workers.dev,workers.dev curl --noproxy '*' -4 -sS -X POST 'https://travel-planner-ai-storage.simpsonlee71.workers.dev' -H 'content-type: text/plain;charset=UTF-8' --data '{"id":"1","action":"set","key":"d1-check","value":{"ok":true}}'
 ```
 
 Or use the browser console:
@@ -140,7 +140,7 @@ Or use the browser console:
 ```js
 fetch('https://travel-planner-ai-storage.simpsonlee71.workers.dev', {
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'text/plain;charset=UTF-8' },
   body: JSON.stringify({ id: '1', action: 'set', key: 'd1-check', value: { ok: true } })
 }).then(r => r.json()).then(console.log);
 ```
@@ -202,6 +202,63 @@ This means the latest shared profiles, trips, admin password, and site settings 
 ## 9) GitHub Pages app is now preconfigured for your worker URL
 The GitHub Pages workflow now injects the Worker endpoint for the whole deployment using repository variable `CLOUDFLARE_WORKER_ENDPOINT` (falling back to the current default if the variable is unset). The current default endpoint is:
 - `https://travel-planner-ai-storage.simpsonlee71.workers.dev`
+
+### Production access URL: use a custom Worker domain
+
+`*.workers.dev` is a shared Cloudflare hostname. Some ISPs, enterprise DNS resolvers,
+and content filters block that hostname or its DNS answers. If the app works through a
+VPN but fails on ordinary Wi-Fi/mobile networks, that is a network reachability problem
+rather than a username/password or D1 problem. CORS headers cannot repair a DNS, TLS,
+or hostname block.
+
+For production, add a hostname you control in **Cloudflare → Workers & Pages →
+travel-planner-ai-storage → Settings → Domains & Routes** (for example,
+`sync.example.com`) and point it to this *same* Worker and D1 binding. Confirm that
+the hostname has an active Cloudflare Universal SSL certificate and does not redirect
+to another host. Then set these GitHub repository variables before redeploying Pages:
+
+- `CLOUDFLARE_WORKER_ENDPOINT=https://sync.example.com/`
+- `CLOUDFLARE_WORKER_ENDPOINT_ALIASES=https://travel-planner-ai-storage.simpsonlee71.workers.dev/`
+
+The primary URL is embedded in new builds; the optional alias lets the app retry the
+old endpoint during migration. Do not use a different Worker/database for the custom
+hostname, or accounts and trips will split across two storage backends.
+
+The browser transport intentionally uses a safelisted `Content-Type` and URL cache
+busting rather than request `Cache-Control`/`Pragma` headers. This keeps normal writes
+as a simple CORS request, avoiding an unnecessary `OPTIONS` preflight that restrictive
+networks commonly block. The Worker must still return CORS headers on **every**
+response, including `OPTIONS`, errors, and health checks.
+
+#### Required action for the current VPN-only failure
+
+The Worker overview showing **one `workers.dev` domain**, one `AI_STORAGE_DB` binding,
+and zero Worker errors means the D1 binding is present and requests that *reach* the
+Worker are succeeding. It does **not** prove that affected users can resolve or connect
+to `workers.dev`. Because the failure disappears behind a VPN, create and deploy a
+custom domain now; it is not an optional per-device workaround in this situation.
+
+1. In Cloudflare, add a zone you control (for example `example.com`) and ensure its
+   nameservers are active in Cloudflare.
+2. In **Workers & Pages → travel-planner-ai-storage → Domains**, select **Add a custom
+   domain** and enter an unused hostname such as `sync.example.com`. Do not add a
+   redirect; it must be a direct Worker custom domain.
+3. Wait until the domain status is **Active** and Universal SSL is active. From an
+   affected network, open `https://sync.example.com/`: it must return the Worker JSON
+   health response, without a certificate warning.
+4. In GitHub **Settings → Secrets and variables → Actions → Variables**, set
+   `CLOUDFLARE_WORKER_ENDPOINT` to `https://sync.example.com/`, optionally set
+   `CLOUDFLARE_WORKER_ENDPOINT_ALIASES` to the old `workers.dev` URL, and rerun
+   **Deploy to GitHub Pages**. Existing browser builds do not receive the new URL until
+   Pages redeploys and users reload the app.
+5. Confirm Cloudflare Workers metrics increment when an affected device opens the app.
+   If they do not, the network is still blocking the new hostname; choose a different
+   domain/DNS provider path rather than changing D1 credentials or CORS headers.
+
+The deployment API token described above is **not used at runtime**: the Worker reaches
+D1 through its `AI_STORAGE_DB` binding. The token permissions shown in the dashboard
+therefore cannot cause a browser `Failed to fetch` after deployment. Do not place an
+API token in the browser, repository variables exposed to Vite, or the in-app settings.
 
 So opening `https://simpson2002-hke.github.io/Travel-Planner-pro/` should automatically attempt cloud sync with no per-device console setup.
 
