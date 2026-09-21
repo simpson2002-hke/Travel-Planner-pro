@@ -5272,7 +5272,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
       const endpoint = getCloudWorkerEndpoint();
       await verifyCloudWorkerEndpoint(endpoint);
       setWorkerEndpoint(endpoint);
-      setMsg("✅ Worker access URL reachable. Sync still uses the same shared Worker/D1 backend; use a custom domain here only when workers.dev is blocked on this network.");
+      setMsg("✅ Worker access URL reachable. This device needs a custom Worker domain if its normal network cannot reach workers.dev; keep that domain pointed at this same Worker/D1 backend.");
       if(onSaved) await onSaved();
     }catch(error){
       setErr(error instanceof Error ? error.message : "Failed to verify cloud sync configuration.");
@@ -5374,7 +5374,7 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      Sync uses one Cloudflare Worker backed by one D1 database. If workers.dev is blocked without VPN, enter a custom domain or route that points to this same Worker; do not enter a different Worker connected to a different D1 database. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
+      Sync uses one Cloudflare Worker backed by one D1 database. A VPN-only failure means the normal network cannot reach workers.dev. Create a custom Worker domain that points to this same Worker, set it as the deployed Worker Access URL for every device, and do not use a different Worker or D1 database. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
     </p>
     <Input th={th} label="Worker Access URL" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
     <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
