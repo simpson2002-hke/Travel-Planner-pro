@@ -5487,9 +5487,12 @@ export function App(){
   };
 
   const handleSignIn=(ident:string,pw:string)=>{
-    if(!sharedSyncReady)return{ok:false,message:"Shared account data is still syncing. Please wait a moment and try again."};
-    if(!sharedSyncHealthy)return{ok:false,message:`Cloud sync has an error on this device: ${syncStatusMessage}`};
+    // Signing in only needs the already-hydrated account list. Do not make an
+    // unrelated refresh failure (for example a workers.dev request blocked on
+    // this network after the data was loaded) lock a known user out.
+    if(!profilesMeta.hydrated)return{ok:false,message:"Shared account data is still syncing. Please wait a moment and try again."};
     const found=profiles.find(p=>(p.email.toLowerCase()===ident.trim().toLowerCase()||p.accountName.toLowerCase()===ident.trim().toLowerCase())&&p.password===pw);
+    if(!found && profilesMeta.lastError)return{ok:false,message:`Cloud sync has an error on this device and accounts could not be refreshed: ${profilesMeta.lastError}`};
     if(!found)return{ok:false,message:t("invalidCredentials")};
     setUserId(found.id);return{ok:true,message:"OK"};
   };
