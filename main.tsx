@@ -623,10 +623,6 @@ const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
 const CLOUD_EDITOR_PRIORITY_MS = 120000;
 const CANONICAL_CLOUD_WORKER_ENDPOINT = normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
-const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT_ALIASES ?? "")
-  .split(",")
-  .map((endpoint:string)=>normalizeCloudWorkerEndpoint(endpoint))
-  .filter(Boolean);
 
 type CloudD1Config = {
   accountId: string;
@@ -672,39 +668,19 @@ function normalizeCloudWorkerEndpoint(rawEndpoint:string | undefined | null){
   }
 }
 
-function getStoredCloudWorkerEndpointOverride(){
-  try{
-    return normalizeCloudWorkerEndpoint(localStorage.getItem(CLOUD_WORKER_ENDPOINT_KEY));
-  }catch{
-    return "";
-  }
-}
-
 function getCloudWorkerEndpoint(){
-  return getStoredCloudWorkerEndpointOverride() || CANONICAL_CLOUD_WORKER_ENDPOINT;
-}
-
-function getCloudWorkerEndpointCandidates(){
-  const candidates: { endpoint: string; source: "saved-access-url" | "deployed-alias" | "canonical-workers-dev" }[] = [];
-  const seen = new Set<string>();
-  const addCandidate = (endpoint:string,source:typeof candidates[number]["source"])=>{
-    const next = normalizeCloudWorkerEndpoint(endpoint);
-    if(!next || seen.has(next)) return;
-    seen.add(next);
-    candidates.push({ endpoint: next, source });
-  };
-
-  addCandidate(getStoredCloudWorkerEndpointOverride(),"saved-access-url");
-  for(const alias of DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT_ALIASES) addCandidate(alias,"deployed-alias");
-  addCandidate(CANONICAL_CLOUD_WORKER_ENDPOINT,"canonical-workers-dev");
-  return candidates;
+  // The Worker URL is a deployment setting, not a browser setting.  Letting each
+  // device prefer its own localStorage URL silently split shared records across
+  // Worker/D1 backends.  A custom domain must therefore be injected at build time.
+  return CANONICAL_CLOUD_WORKER_ENDPOINT;
 }
 
 function setCloudWorkerEndpoint(endpoint:string){
   const next = normalizeCloudWorkerEndpoint(endpoint);
   if(next && next !== CANONICAL_CLOUD_WORKER_ENDPOINT){
-    localStorage.setItem(CLOUD_WORKER_ENDPOINT_KEY,next);
-    return;
+    throw new Error(
+      "Worker Access URL is deployment-wide. Set CLOUDFLARE_WORKER_ENDPOINT in GitHub Actions and redeploy so every device uses the same Worker/D1 backend."
+    );
   }
   localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
 }
@@ -792,10 +768,24 @@ function buildCloudWorkerGetTunnelUrl(endpoint:string,payload:{id:string;action:
   return url;
 }
 
-async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key?:string;value?:unknown}){
+async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action:string;key?:string;value?:unknown},{preferGet=false}:{preferGet?:boolean}={}){
   const requestEndpoint = new URL(endpoint);
   requestEndpoint.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
   requestEndpoint.searchParams.set("_",String(Date.now()));
+
+  const getPayload = async()=>{
+    const url = buildCloudWorkerGetTunnelUrl(endpoint,payload);
+    const response = await fetch(url.toString(),{
+      method:"GET",
+      mode:"cors",
+      credentials:"omit",
+      cache:"no-store",
+      referrerPolicy:"no-referrer",
+    });
+    return { response, payload: await parseCloudWorkerResponse(response) };
+  };
+
+  if(preferGet) return getPayload();
 
   try{
     const response = await fetch(requestEndpoint.toString(),{
@@ -812,15 +802,7 @@ async function fetchCloudWorkerPayload(endpoint:string,payload:{id:string;action
     return { response, payload: await parseCloudWorkerResponse(response) };
   }catch(postError){
     try{
-      const url = buildCloudWorkerGetTunnelUrl(endpoint,payload);
-      const response = await fetch(url.toString(),{
-        method:"GET",
-        mode:"cors",
-        credentials:"omit",
-        cache:"no-store",
-        referrerPolicy:"no-referrer",
-      });
-      return { response, payload: await parseCloudWorkerResponse(response) };
+      return await getPayload();
     }catch(getError){
       if(payload.action==="get") throw getError;
       throw postError;
@@ -846,34 +828,26 @@ async function verifyCloudWorkerEndpoint(endpointOverride?:string){
 }
 
 async function cloudStorageRequest(action:string,key:string,value?:unknown){
-  const workerEndpoints = getCloudWorkerEndpointCandidates();
-  const workerErrors: string[] = [];
-  for(const candidate of workerEndpoints){
-    const workerEndpoint = candidate.endpoint;
-    try{
-      const { response: resp, payload } = await fetchCloudWorkerPayload(workerEndpoint,{ id:crypto.randomUUID(), action, key, value });
-      if(!resp.ok || payload?.ok !== true){
-        throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
-      }
-      return payload?.data;
-    }catch(error){
-      const rawMessage = error instanceof Error ? error.message : "Unknown worker fetch error.";
-      workerErrors.push(
-        `Worker fetch failed for ${workerEndpoint}: ${rawMessage}. `+
-        "If this says 'Failed to fetch', verify Worker CORS headers and that the endpoint is reachable from the browser."
-      );
-    }
-  }
-
   if(action!=="set" && action!=="get"){
     throw new Error(`Unsupported cloud storage action: ${action}`);
   }
-
-  const workerMessage = workerErrors.length>0 ? ` Worker endpoint error: ${workerErrors[workerErrors.length-1]}` : "";
-  if(workerEndpoints.length>0){
-    throw new Error(`Cloud sync failed in Worker mode.${workerMessage}`);
+  const workerEndpoint = getCloudWorkerEndpoint();
+  if(!workerEndpoint){
+    throw new Error("Cloud sync failed: the deployment is missing CLOUDFLARE_WORKER_ENDPOINT.");
   }
-  throw new Error(`Cloud sync failed: unable to reach worker or D1 configuration is incomplete.${workerMessage}`);
+  try{
+    const { response: resp, payload } = await fetchCloudWorkerPayload(workerEndpoint,{ id:crypto.randomUUID(), action, key, value });
+    if(!resp.ok || payload?.ok !== true){
+      throw new Error(payload?.error ?? `Cloud worker request failed (${resp.status})`);
+    }
+    return payload?.data;
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown worker fetch error.";
+    throw new Error(
+      `Cloud sync failed for the deployment Worker ${workerEndpoint}: ${rawMessage}. `+
+      "If this says 'Failed to fetch', configure a publicly reachable custom Worker domain in CLOUDFLARE_WORKER_ENDPOINT and redeploy the app."
+    );
+  }
 }
 
 function getCloudDeviceId(){
@@ -5294,31 +5268,24 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     setMsg("");
 
     try{
-      const optionsUrl = new URL(endpoint);
-      optionsUrl.searchParams.set("_tpv",APP_CACHE_SCHEMA_VERSION);
-      optionsUrl.searchParams.set("_",String(Date.now()));
-      const optionsResp = await fetch(optionsUrl.toString(),{
-        method:"OPTIONS",
-        mode:"cors",
-        credentials:"omit",
-        cache:"no-store",
-        referrerPolicy:"no-referrer",
-      });
-      const allowOrigin = optionsResp.headers.get("access-control-allow-origin") || "(missing)";
-      const allowMethods = optionsResp.headers.get("access-control-allow-methods") || "(missing)";
-      const allowHeaders = optionsResp.headers.get("access-control-allow-headers") || "(missing)";
-
-      const { response: postResp, payload: postPayload } = await fetchCloudWorkerPayload(endpoint,{
+      // Sync requests deliberately use a CORS-safelisted content type.  Testing
+      // OPTIONS here made the diagnostic fail on networks that block preflight
+      // even though the actual simple request would work.  Use the GET tunnel to
+      // validate the browser-visible CORS response without a preflight.
+      const { response, payload } = await fetchCloudWorkerPayload(endpoint,{
         id:crypto.randomUUID(),
         action:"get",
         key:"tp-sync-healthcheck",
-      });
+      },{preferGet:true});
+      const allowOrigin = response.headers.get("access-control-allow-origin") || "(missing)";
+      const allowMethods = response.headers.get("access-control-allow-methods") || "(missing)";
+      const allowHeaders = response.headers.get("access-control-allow-headers") || "(missing)";
 
-      if(!postResp.ok || postPayload?.ok !== true){
-        throw new Error(postPayload?.error ?? `POST healthcheck failed (${postResp.status})`);
+      if(!response.ok || payload?.ok !== true){
+        throw new Error(payload?.error ?? `GET healthcheck failed (${response.status})`);
       }
 
-      setMsg(`✅ CORS self-test passed. OPTIONS=${optionsResp.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}; POST=${postResp.status}.`);
+      setMsg(`✅ CORS self-test passed. GET=${response.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}.`);
     }catch(error){
       setErr(error instanceof Error ? error.message : "CORS self-test failed.");
     }finally{
@@ -5367,26 +5334,26 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   const resetWorkerEndpointToDefault = ()=>{
     setCloudWorkerEndpoint("");
     setWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
-    setMsg("Using the default workers.dev endpoint on this device.");
+    setMsg("Cleared the legacy browser-local Worker URL. Sync uses the deployment URL shown above.");
     setErr("");
   };
 
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      Sync uses one Cloudflare Worker backed by one D1 database. A VPN-only failure means the normal network cannot reach workers.dev. Create a custom Worker domain that points to this same Worker, set it as the deployed Worker Access URL for every device, and do not use a different Worker or D1 database. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
+      Sync uses the one Worker URL embedded in this app deployment and one D1 database. To avoid splitting data, this browser cannot change that URL independently. For a VPN-only workers.dev failure, point a custom Worker domain at this same Worker/D1 backend, set it as the GitHub Actions CLOUDFLARE_WORKER_ENDPOINT variable, and redeploy the app. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
     </p>
-    <Input th={th} label="Worker Access URL" value={workerEndpoint} onChange={e=>setWorkerEndpoint(e.target.value)} placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
+    <Input th={th} label="Deployment Worker Access URL" value={workerEndpoint} readOnly placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
     <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
     <Input th={th} label="Cloudflare D1 Database ID" value={databaseId} onChange={e=>setDatabaseId(e.target.value)}/>
     <Input th={th} label="Cloudflare API Token" type="password" value={apiToken} onChange={e=>setApiToken(e.target.value)}/>
     {msg&&<p className="text-emerald-400 text-sm">{msg}</p>}
     {err&&<p className="text-rose-400 text-sm break-words">{err}</p>}
     <div className="flex flex-wrap gap-2">
-      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Save & Verify"}</Btn>
+      <Btn th={th} type="button" onClick={()=>{saveAndVerify().catch(()=>{});}} disabled={busy || testing || d1Testing}>{busy?"Saving…":"Verify Deployment"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runWorkerCorsSelfTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{testing?"Testing…":"Run CORS Self-Test"}</Btn>
       <Btn th={th} type="button" v="sec" onClick={()=>{runD1SchemaTest().catch(()=>{});}} disabled={busy || testing || d1Testing}>{d1Testing?"Testing D1…":"Run D1 Schema Test"}</Btn>
-      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Use workers.dev Default</Btn>
+      <Btn th={th} type="button" v="sec" onClick={resetWorkerEndpointToDefault} disabled={busy || testing || d1Testing}>Clear Old Local URL</Btn>
       <Btn th={th} type="button" v="sec" onClick={fillFromStored} disabled={busy || testing || d1Testing}>Load Saved</Btn>
     </div>
   </Card>;
