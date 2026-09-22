@@ -271,10 +271,109 @@ localStorage.setItem('tp-cloud-worker-endpoint', 'https://YOUR-WORKER.workers.de
 location.reload();
 ```
 
-## 10) Security and diagnostics
+## 10) Initialize sync in the current app build (D1 REST fallback mode)
 
-The browser never calls the Cloudflare D1 REST API and must never receive an account API token. The deployed Worker is the only component that accesses the `AI_STORAGE_DB` binding.
+> Important: the app should use the Cloudflare Worker endpoint by default. Direct Cloudflare D1 REST credentials are only a fallback for private/admin troubleshooting because browser builds are public and must not contain API tokens.
+>
+> The app reads these optional localStorage keys on each device:
+> - `tp-cloudflare-account-id`
+> - `tp-cloudflare-d1-database-id`
+> - `tp-cloudflare-api-token`
 
-Use **Admin → Cloud Sync Credentials → Run CORS Self-Test** to call `GET /api/health` (with a browser preflight), and **Run D1 Schema Test** to call `GET /api/schema`. These tests report the URL, HTTP status, CORS headers, D1 health, and a response preview.
+### 10.0 Current deployment defaults
+The current app build includes the Worker endpoint plus the non-secret Cloudflare account/database IDs, but it intentionally does **not** include a default API token. If direct D1 fallback is needed, enter a freshly generated token through **Admin → Website → Cloud Sync Credentials** and click **Save & Verify** on that browser only.
 
-For production, keep `GET /api/health` and `GET /api/schema` limited to health information. Do not add a route that proxies arbitrary SQL or exposes D1 credentials. Verify any Cloudflare Access policy permits `OPTIONS` to reach the Worker before authentication; browsers cannot attach normal session credentials to preflight requests.
+If an API token was pasted into chat, logs, client code, screenshots, or docs, revoke it immediately and create a new one before testing again.
+
+### 10.1 One-time prerequisites
+1. Create/confirm a D1 database in Cloudflare.
+2. Create an API token that can query your D1 DB:
+   - Account → D1 → Edit (or equivalent D1 read/write permission)
+3. Copy these values:
+   - Cloudflare Account ID
+   - D1 Database ID
+   - API Token
+
+### 10.2 Initialize sync on each browser/device
+Open your deployed app, then open browser devtools Console and run:
+
+```js
+localStorage.setItem('tp-cloudflare-account-id', 'YOUR_ACCOUNT_ID');
+localStorage.setItem('tp-cloudflare-d1-database-id', 'YOUR_D1_DATABASE_ID');
+localStorage.setItem('tp-cloudflare-api-token', 'YOUR_API_TOKEN');
+location.reload();
+```
+
+After reload, the app will:
+- pull shared keys from cloud on startup,
+- push changes when shared data changes,
+- auto refresh every 15 seconds,
+- and also refresh on focus/visibility/online events.
+
+### 10.3 Verify sync is working (recommended checks)
+
+#### Check A (in-app behavior)
+1. Device A: create/update a profile or trip.
+2. Wait 15–20 seconds.
+3. Device B: open the same app URL and sign in with the same account.
+4. Click **Sync** in the header (manual refresh) if needed.
+5. Confirm the same change appears.
+
+#### Check B (direct D1 read from browser)
+In Console, run this read helper on either device:
+
+```js
+(async()=>{
+  const accountId = localStorage.getItem('tp-cloudflare-account-id');
+  const databaseId = localStorage.getItem('tp-cloudflare-d1-database-id');
+  const apiToken = localStorage.getItem('tp-cloudflare-api-token');
+  const sql = 'SELECT storage_key, updated_at FROM ai_storage ORDER BY updated_at DESC LIMIT 20';
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${apiToken}`,
+    },
+    body: JSON.stringify({ sql, params: [] }),
+  });
+
+  console.log(await res.json());
+})();
+```
+
+You should see rows for keys like:
+- `tp-profiles`
+- `tp-trips`
+- `tp-admin-pw`
+- `tp-site-settings`
+
+If `updated_at` changes after you edit data, sync is working.
+
+### 10.4 Why sync may look like "cannot be verified"
+Common reasons and fixes:
+- **Missing localStorage credentials on one device** → set all 3 keys and reload.
+- **Wrong Account ID / DB ID / API token** → check first error shown in Sync status and re-enter values.
+- **Token was exposed** → revoke it in Cloudflare, create a new least-privilege token, update only GitHub Actions secrets or the private in-app admin fallback, then redeploy.
+- **Token lacks D1 permission** → regenerate token with D1 query/write permission.
+- **Different app URLs/environments** (staging vs production) → ensure both devices open the same deployment.
+- **No visible instant change** → expected; background polling interval is 15 seconds.
+
+## 11) Recover a GitHub Pages site after accidentally renaming the repository
+
+A repository rename changes the default project Pages URL path. For this repo, the expected Pages URL is:
+
+```text
+https://simpson2002-hke.github.io/Travel-Planner-pro/
+```
+
+If you renamed the repository and then renamed it back, use this checklist:
+
+1. GitHub repository → **Settings** → **Pages**. Confirm the site is deployed from **GitHub Actions**.
+2. GitHub repository → **Actions** → run **Deploy to GitHub Pages** manually, or push a commit to `main`.
+3. Wait for the workflow to finish, then open the exact URL with the trailing slash: `https://simpson2002-hke.github.io/Travel-Planner-pro/`.
+4. If the repository name changes again, either rename it back to `Travel-Planner-pro` or set `VITE_BASE_PATH` in the Pages workflow/repository variables to the new path, for example `/new-repo-name/`.
+5. If the old URL still 404s after a successful deploy, clear the browser cache and confirm the repository is public or that GitHub Pages is enabled for private repositories on your plan.
+
+The Vite config now derives the GitHub Pages base path from `GITHUB_REPOSITORY` during GitHub Actions builds, with `VITE_BASE_PATH` available as an explicit override.
