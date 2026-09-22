@@ -218,10 +218,11 @@ the hostname has an active Cloudflare Universal SSL certificate and does not red
 to another host. Then set these GitHub repository variables before redeploying Pages:
 
 - `CLOUDFLARE_WORKER_ENDPOINT=https://sync.example.com/`
+- `CLOUDFLARE_WORKER_ENDPOINT_ALIASES=https://travel-planner-ai-storage.simpsonlee71.workers.dev/`
 
-The URL is embedded in new builds and is the only backend the app uses. Do not use a
-different Worker/database for the custom hostname, or accounts and trips will split
-across two storage backends.
+The primary URL is embedded in new builds; the optional alias lets the app retry the
+old endpoint during migration. Do not use a different Worker/database for the custom
+hostname, or accounts and trips will split across two storage backends.
 
 The browser transport intentionally uses a safelisted `Content-Type` and URL cache
 busting rather than request `Cache-Control`/`Pragma` headers. This keeps normal writes

@@ -9,7 +9,7 @@ This guide explains how to set up cloud sync for Travel Planner Pro and verify i
 You need:
 
 1. A deployed web app URL (same URL must be used on all devices).
-2. A deployed Cloudflare Worker endpoint on a publicly reachable custom domain (for example: `https://sync.example.com`).
+2. A deployed Cloudflare Worker endpoint (for example: `https://your-worker.workers.dev`).
 3. (Optional fallback) Cloudflare D1 credentials:
    - Account ID
    - D1 Database ID
@@ -19,19 +19,18 @@ You need:
 
 ---
 
-## 2) Configure Sync Once for Every Device
+## 2) Configure Sync in the App (No Devtools Required)
 
-1. In Cloudflare, attach a custom Worker domain to the **existing** Worker. It must retain the existing `AI_STORAGE_DB` binding.
-2. In GitHub → **Settings → Secrets and variables → Actions → Variables**, set `CLOUDFLARE_WORKER_ENDPOINT` to that custom-domain URL.
-3. Redeploy GitHub Pages so the URL is embedded in the app build.
-4. Open the app on each device and use **Admin → Cloud Sync Credentials → Verify Deployment**.
-5. Optional: enter D1 Account ID / Database ID / API Token only for private diagnostics.
+1. Open the app.
+2. Go to **Admin**.
+3. Open the cloud sync section (**Cloud Sync Credentials**).
+4. Enter **Cloudflare Worker Endpoint**.
+5. Optional: enter D1 Account ID / Database ID / API Token for fallback mode.
+6. Click **Save & Verify**.
 
 Expected result:
-- If the deployment Worker endpoint is reachable, you should see a success message.
+- If worker endpoint is reachable, you should see a success message.
 - If worker fails but D1 is correctly configured, D1 verification should pass.
-
-The Worker Access URL is intentionally read-only in the app. A browser-local endpoint would allow different devices to write to different Workers/D1 databases, which looks like each device has its own data.
 
 ---
 
@@ -63,9 +62,9 @@ Use two devices or two separate browsers/profiles.
 
 If data does not appear:
 - Confirm both devices use the exact same app deployment URL.
-- Confirm both devices have loaded the same, newly deployed app build. The deployment Worker URL displayed in Admin must be identical.
+- Confirm worker endpoint value is identical on both devices.
 - Click **Sync now** on both devices.
-- Re-open Admin sync panel and **Verify Deployment**.
+- Re-open Admin sync panel and **Save & Verify**.
 
 ---
 
@@ -131,7 +130,7 @@ Expected:
 ## 8) Recommended Operating Mode
 
 For production users:
-1. Configure the Worker endpoint once in GitHub Actions and verify the deployment in Admin.
+1. Configure and verify Worker endpoint once in Admin.
 2. Keep D1 credentials blank on normal user devices.
 3. Let auto-sync handle updates; use manual buttons only for immediate refresh/troubleshooting.
 
@@ -143,8 +142,8 @@ Recommended fix while keeping one shared trip server:
 
 1. Keep the existing Cloudflare Worker and its existing `AI_STORAGE_DB` D1 binding. Do **not** create a second Worker or a second D1 database.
 2. Add a Cloudflare custom domain or Worker route that points to the same Worker script.
-3. Set the custom-domain URL in GitHub Actions variable `CLOUDFLARE_WORKER_ENDPOINT` and redeploy the app.
-4. Open **Admin → Website → Cloud Sync Credentials** and click **Verify Deployment**.
+3. Open **Admin → Website → Cloud Sync Credentials**.
+4. Enter the custom domain URL in **Worker Access URL** and click **Save & Verify**.
 5. Run **CORS Self-Test** and **D1 Schema Test** from the affected non-VPN network.
 
 The Worker access URL may be different, but it must route to the same Worker and D1 binding. That keeps all devices on one shared data store while avoiding networks that block `workers.dev`.
