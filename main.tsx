@@ -608,15 +608,48 @@ function useMobileScreen(){
 
 const CLOUD_DEVICE_ID_KEY = "tp-cloud-device-id";
 const CLOUD_WORKER_ENDPOINT_KEY = "tp-cloud-worker-endpoint";
-// This is the only frontend API origin. It must remain an absolute HTTPS Worker URL
-// because GitHub Pages and the Worker are different origins.
+const CLOUD_CF_ACCOUNT_ID_KEY = "tp-cloudflare-account-id";
+const CLOUD_D1_DATABASE_ID_KEY = "tp-cloudflare-d1-database-id";
+const CLOUD_CF_API_TOKEN_KEY = "tp-cloudflare-api-token";
 const DEFAULT_CLOUDFLARE_WORKER_ENDPOINT = "https://travel-planner-ai-storage.simpsonlee71.workers.dev";
-const API_BASE_URL = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT ?? DEFAULT_CLOUDFLARE_WORKER_ENDPOINT).trim();
-const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT = API_BASE_URL;
+const DEFAULT_CLOUDFLARE_ACCOUNT_ID = "64ba8506f5d201ceed54c05d58743ce4";
+const DEFAULT_CLOUDFLARE_D1_DATABASE_ID = "f46d6590-0fec-4df0-b31e-49dbf4b25476";
+const DEFAULT_CLOUDFLARE_API_TOKEN = "";
+const DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT = (import.meta.env.VITE_CLOUDFLARE_WORKER_ENDPOINT ?? DEFAULT_CLOUDFLARE_WORKER_ENDPOINT).trim();
+const DEPLOYED_CLOUDFLARE_ACCOUNT_ID = (import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID ?? DEFAULT_CLOUDFLARE_ACCOUNT_ID).trim();
+const DEPLOYED_CLOUDFLARE_D1_DATABASE_ID = (import.meta.env.VITE_CLOUDFLARE_D1_DATABASE_ID ?? DEFAULT_CLOUDFLARE_D1_DATABASE_ID).trim();
+const DEPLOYED_CLOUDFLARE_API_TOKEN = (import.meta.env.VITE_CLOUDFLARE_API_TOKEN ?? DEFAULT_CLOUDFLARE_API_TOKEN).trim();
 const CLOUD_SHARED_KEYS = new Set([SK.profiles,SK.trips,SK.adminPw,SK.site]);
 const CLOUD_SYNC_INTERVAL_MS = 15000;
 const CLOUD_EDITOR_PRIORITY_MS = 120000;
 const CANONICAL_CLOUD_WORKER_ENDPOINT = normalizeCloudWorkerEndpoint(DEPLOYED_CLOUDFLARE_WORKER_ENDPOINT);
+
+type CloudD1Config = {
+  accountId: string;
+  databaseId: string;
+  apiToken: string;
+};
+
+function getCloudD1Config(): CloudD1Config{
+  try{
+    const accountId = localStorage.getItem(CLOUD_CF_ACCOUNT_ID_KEY)?.trim() || DEPLOYED_CLOUDFLARE_ACCOUNT_ID;
+    const databaseId = localStorage.getItem(CLOUD_D1_DATABASE_ID_KEY)?.trim() || DEPLOYED_CLOUDFLARE_D1_DATABASE_ID;
+    const apiToken = localStorage.getItem(CLOUD_CF_API_TOKEN_KEY)?.trim() || DEPLOYED_CLOUDFLARE_API_TOKEN;
+    return { accountId, databaseId, apiToken };
+  }catch{
+    return {
+      accountId: DEPLOYED_CLOUDFLARE_ACCOUNT_ID,
+      databaseId: DEPLOYED_CLOUDFLARE_D1_DATABASE_ID,
+      apiToken: DEPLOYED_CLOUDFLARE_API_TOKEN,
+    };
+  }
+}
+
+function setCloudD1Config(config:CloudD1Config){
+  localStorage.setItem(CLOUD_CF_ACCOUNT_ID_KEY,config.accountId.trim());
+  localStorage.setItem(CLOUD_D1_DATABASE_ID_KEY,config.databaseId.trim());
+  localStorage.setItem(CLOUD_CF_API_TOKEN_KEY,config.apiToken.trim());
+}
 
 function normalizeCloudWorkerEndpoint(rawEndpoint:string | undefined | null){
   const raw = rawEndpoint?.trim() ?? "";
@@ -642,28 +675,6 @@ function getCloudWorkerEndpoint(){
   return CANONICAL_CLOUD_WORKER_ENDPOINT;
 }
 
-function workerApiUrl(path:string){
-  const endpoint = getCloudWorkerEndpoint();
-  if(!endpoint) throw new Error("Cloud sync failed: the deployment is missing VITE_CLOUDFLARE_WORKER_ENDPOINT.");
-  return new URL(path.replace(/^\//,""), endpoint).toString();
-}
-
-async function fetchWorkerApi(path:string, init:RequestInit = {}){
-  const url = workerApiUrl(path);
-  let response:Response;
-  try{
-    response = await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store",...init});
-  }catch(error){
-    console.error(`[Travel Planner API] ${path} network failure (${url})`,error);
-    throw new Error(`Unable to reach ${url}. ${error instanceof Error ? error.message : "Network request failed."}`);
-  }
-  const bodyText = await response.text();
-  let body:unknown = bodyText;
-  try{body=bodyText ? JSON.parse(bodyText) : {};}catch{}
-  if(!response.ok) console.error(`[Travel Planner API] ${path} returned HTTP ${response.status} (${url})`,body);
-  return {url,response,body,bodyText};
-}
-
 function setCloudWorkerEndpoint(endpoint:string){
   const next = normalizeCloudWorkerEndpoint(endpoint);
   if(next && next !== CANONICAL_CLOUD_WORKER_ENDPOINT){
@@ -672,6 +683,59 @@ function setCloudWorkerEndpoint(endpoint:string){
     );
   }
   localStorage.removeItem(CLOUD_WORKER_ENDPOINT_KEY);
+}
+
+async function cloudD1Query(config:CloudD1Config,sql:string,params:unknown[]=[]){
+  if(!config.accountId || !config.databaseId || !config.apiToken){
+    throw new Error("Cloudflare D1 config missing. Set account id, database id, and API token.");
+  }
+
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`;
+  let res: Response;
+  try{
+    res = await fetch(endpoint,{
+      method:"POST",
+      headers:{
+        "content-type":"application/json",
+        "authorization":`Bearer ${config.apiToken}`,
+      },
+      body:JSON.stringify({sql,params}),
+    });
+  }catch(error){
+    const rawMessage = error instanceof Error ? error.message : "Unknown fetch error.";
+    throw new Error(
+      `Cloudflare D1 API fetch failed for ${endpoint}. ${rawMessage} `+
+      "Direct D1 API calls from browsers are often blocked by CORS; prefer Worker endpoint mode for client-side sync."
+    );
+  }
+  const data = await res.json();
+  if(!res.ok || !data?.success){
+    const err = data?.errors?.[0]?.message ?? data?.messages?.[0] ?? `Cloudflare D1 query failed (${res.status})`;
+    throw new Error(err);
+  }
+
+  const first = Array.isArray(data.result) ? data.result[0] : data.result;
+  if(first?.success === false){
+    const err = first?.error ?? first?.errors?.[0]?.message ?? "Cloudflare D1 statement failed.";
+    throw new Error(err);
+  }
+  return first;
+}
+
+async function ensureCloudD1Schema(config:CloudD1Config){
+  await cloudD1Query(
+    config,
+    "CREATE TABLE IF NOT EXISTS ai_storage (storage_key TEXT PRIMARY KEY, storage_value TEXT NOT NULL, updated_at TEXT NOT NULL);"
+  );
+  await cloudD1Query(
+    config,
+    "CREATE INDEX IF NOT EXISTS idx_ai_storage_updated_at ON ai_storage(updated_at);"
+  );
+}
+
+async function verifyCloudD1Config(config:CloudD1Config){
+  await ensureCloudD1Schema(config);
+  await cloudD1Query(config,"SELECT 1 AS ok");
 }
 
 async function parseCloudWorkerResponse(response:Response){
@@ -888,14 +952,9 @@ function useSharedPersist<T>(key:string,init:T){
       try{
         await pullRemote();
       }catch(error){
-        // Show the first failure immediately, then make one bounded retry for
-        // temporary network/DNS failures without replacing cached UI data.
         setLastError(error instanceof Error ? error.message : "Cloud sync failed.");
         hydratedRef.current = true;
         setHydrated(true);
-        window.setTimeout(()=>{
-          pullRemote().catch(retryError=>setLastError(retryError instanceof Error ? retryError.message : "Cloud sync retry failed."));
-        },1200);
       }
     })();
     // run only once on mount
@@ -932,7 +991,7 @@ function useSharedPersist<T>(key:string,init:T){
           }
         }catch{}
       }
-      if(event.key === CLOUD_WORKER_ENDPOINT_KEY){
+      if(event.key === CLOUD_WORKER_ENDPOINT_KEY || event.key === CLOUD_CF_ACCOUNT_ID_KEY || event.key === CLOUD_D1_DATABASE_ID_KEY || event.key === CLOUD_CF_API_TOKEN_KEY){
         syncNow();
       }
     };
@@ -5151,7 +5210,11 @@ function AdminWebsite({th,t,settings,onSave}:{th:ThemeMode;t:(k:TKey)=>string;se
 }
 
 function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<void>|void}){
+  const initial = useMemo(()=>getCloudD1Config(),[]);
   const [workerEndpoint,setWorkerEndpoint] = useState(()=>getCloudWorkerEndpoint());
+  const [accountId,setAccountId] = useState(initial.accountId);
+  const [databaseId,setDatabaseId] = useState(initial.databaseId);
+  const [apiToken,setApiToken] = useState(initial.apiToken);
   const [busy,setBusy] = useState(false);
   const [testing,setTesting] = useState(false);
   const [d1Testing,setD1Testing] = useState(false);
@@ -5159,17 +5222,27 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   const [err,setErr] = useState("");
 
   const fillFromStored = ()=>{
+    const existing = getCloudD1Config();
     setWorkerEndpoint(getCloudWorkerEndpoint());
-    setMsg("Loaded the Worker URL embedded in this deployment.");
+    setAccountId(existing.accountId);
+    setDatabaseId(existing.databaseId);
+    setApiToken(existing.apiToken);
+    setMsg("Loaded current saved credentials.");
     setErr("");
   };
 
   const saveAndVerify = async()=>{
+    const nextConfig: CloudD1Config = {
+      accountId: accountId.trim(),
+      databaseId: databaseId.trim(),
+      apiToken: apiToken.trim(),
+    };
     setBusy(true);
     setErr("");
     setMsg("");
     try{
       setCloudWorkerEndpoint(workerEndpoint);
+      setCloudD1Config(nextConfig);
       const endpoint = getCloudWorkerEndpoint();
       await verifyCloudWorkerEndpoint(endpoint);
       setWorkerEndpoint(endpoint);
@@ -5195,22 +5268,26 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     setMsg("");
 
     try{
-      // X-Requested-With deliberately makes this cross-origin GET preflighted.
-      // The browser therefore verifies OPTIONS before it exposes the GET response.
-      const {url,response,body,bodyText} = await fetchWorkerApi("/api/health",{headers:{"X-Requested-With":"TravelPlannerCorsSelfTest"}});
+      // Sync requests deliberately use a CORS-safelisted content type.  Testing
+      // OPTIONS here made the diagnostic fail on networks that block preflight
+      // even though the actual simple request would work.  Use the GET tunnel to
+      // validate the browser-visible CORS response without a preflight.
+      const { response, payload } = await fetchCloudWorkerPayload(endpoint,{
+        id:crypto.randomUUID(),
+        action:"get",
+        key:"tp-sync-healthcheck",
+      },{preferGet:true});
       const allowOrigin = response.headers.get("access-control-allow-origin") || "(missing)";
       const allowMethods = response.headers.get("access-control-allow-methods") || "(missing)";
       const allowHeaders = response.headers.get("access-control-allow-headers") || "(missing)";
-      const d1 = (body as {data?:{d1?:string}})?.data?.d1 ?? "unknown";
-      const preview = bodyText.slice(0,240) || "(empty)";
 
-      if(!response.ok || (body as {ok?:boolean})?.ok !== true){
-        throw new Error(`API URL: ${url}; HTTP status: ${response.status}; CORS status: A-C-Allow-Origin=${allowOrigin}; D1: ${d1}; body: ${preview}. Suggestion: ${allowOrigin==="(missing)" ? "CORS header missing." : "Check the Worker health route and D1 binding."}`);
+      if(!response.ok || payload?.ok !== true){
+        throw new Error(payload?.error ?? `GET healthcheck failed (${response.status})`);
       }
 
-      setMsg(`✅ CORS self-test passed. API URL: ${url}; HTTP status: ${response.status}; CORS status: allowed origin=${allowOrigin}, methods=${allowMethods}, headers=${allowHeaders}; preflight: browser completed OPTIONS before this GET; D1 reachable: ${d1}; response preview: ${preview}`);
+      setMsg(`✅ CORS self-test passed. GET=${response.status}; A-C-Allow-Origin=${allowOrigin}; A-C-Allow-Methods=${allowMethods}; A-C-Allow-Headers=${allowHeaders}.`);
     }catch(error){
-      setErr(`${error instanceof Error ? error.message : "CORS self-test failed."} If the Worker is unreachable, open ${workerApiUrl("/api/health")} directly in a browser. Suggestion: OPTIONS request blocked, CORS header missing, or the network cannot reach this Worker URL.`);
+      setErr(error instanceof Error ? error.message : "CORS self-test failed.");
     }finally{
       setTesting(false);
     }
@@ -5223,11 +5300,27 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
     try{
       const endpoint = getCloudWorkerEndpoint();
       if(endpoint){
-        const {url,response,body,bodyText} = await fetchWorkerApi("/api/schema");
-        const schema = body as {ok?:boolean;data?:{status?:string;d1?:string;tables?:{name:string;columns:unknown[]}[]};error?:string};
-        if(!response.ok || schema.ok!==true) throw new Error(`API URL: ${url}; HTTP status: ${response.status}; D1 status: ${schema.data?.d1 ?? "unreachable"}; response: ${bodyText.slice(0,240)}; ${schema.error ?? "D1 schema route failed."}`);
-        const tables = schema.data?.tables?.map(table=>`${table.name} (${table.columns.length} columns)`).join(", ") || "none";
-        setMsg(`✅ D1 schema test passed via Worker route ${url}. HTTP status: ${response.status}; D1: ${schema.data?.d1}; tables: ${tables}; response preview: ${bodyText.slice(0,240)}`);
+        const testKey = `tp-d1-self-test-${Date.now()}`;
+        const { response: setResp, payload: setPayload } = await fetchCloudWorkerPayload(endpoint,{
+          id:crypto.randomUUID(),
+          action:"set",
+          key:testKey,
+          value:{ ok:true, t:Date.now() },
+        });
+        if(!setResp.ok || setPayload?.ok !== true){
+          throw new Error(setPayload?.error ?? `Worker D1 set test failed (${setResp.status})`);
+        }
+
+        const { response: getResp, payload: getPayload } = await fetchCloudWorkerPayload(endpoint,{
+          id:crypto.randomUUID(),
+          action:"get",
+          key:testKey,
+        });
+        const data = getPayload?.data;
+        if(!getResp.ok || getPayload?.ok !== true || data?.exists !== true){
+          throw new Error(getPayload?.error ?? `Worker D1 get test failed (${getResp.status})`);
+        }
+        setMsg("✅ D1 schema/storage test passed via Worker endpoint (set/get succeeded).");
       }else{
         throw new Error("Canonical Worker endpoint is missing from this build.");
       }
@@ -5248,9 +5341,12 @@ function AdminCloudSyncConfig({th,onSaved}:{th:ThemeMode;onSaved?:()=>Promise<vo
   return <Card th={th} className="p-6 space-y-4">
     <h3 className="font-semibold text-xl">☁️ Cloud Sync Credentials</h3>
     <p className={cx("text-sm leading-relaxed",th==="dark"?"text-slate-300":"text-slate-600")}>
-      Sync uses the one Worker URL embedded in this app deployment and one D1 database. To avoid splitting data, this browser cannot change that URL independently. D1 credentials are never requested or stored in the browser. For a VPN-only workers.dev failure, point a custom Worker domain at this same Worker/D1 backend, set it as the GitHub Actions CLOUDFLARE_WORKER_ENDPOINT variable, and redeploy the app.
+      Sync uses the one Worker URL embedded in this app deployment and one D1 database. To avoid splitting data, this browser cannot change that URL independently. For a VPN-only workers.dev failure, point a custom Worker domain at this same Worker/D1 backend, set it as the GitHub Actions CLOUDFLARE_WORKER_ENDPOINT variable, and redeploy the app. Optional D1 credentials below are only kept for private diagnostics and are not used for normal sync.
     </p>
     <Input th={th} label="Deployment Worker Access URL" value={workerEndpoint} readOnly placeholder={CANONICAL_CLOUD_WORKER_ENDPOINT}/>
+    <Input th={th} label="Cloudflare Account ID" value={accountId} onChange={e=>setAccountId(e.target.value)}/>
+    <Input th={th} label="Cloudflare D1 Database ID" value={databaseId} onChange={e=>setDatabaseId(e.target.value)}/>
+    <Input th={th} label="Cloudflare API Token" type="password" value={apiToken} onChange={e=>setApiToken(e.target.value)}/>
     {msg&&<p className="text-emerald-400 text-sm">{msg}</p>}
     {err&&<p className="text-rose-400 text-sm break-words">{err}</p>}
     <div className="flex flex-wrap gap-2">
@@ -5516,13 +5612,6 @@ export function App(){
   }
 
   return <div className={cx("min-h-screen transition-colors duration-300",bg)}>
-    {syncStatusMessage&&sharedSyncReady&&<div className="sticky top-0 z-[100] mx-auto max-w-5xl px-4 pt-3">
-      <div className={cx("rounded-xl border p-4 text-sm shadow-lg",theme==="dark"?"border-amber-400/40 bg-amber-950/95 text-amber-100":"border-amber-300 bg-amber-50 text-amber-950")}>
-        <p className="font-semibold">Unable to load shared travel data. Please check your internet connection or try again.</p>
-        <p className="mt-1 break-words">{syncStatusMessage}</p>
-        <div className="mt-3 flex flex-wrap items-center gap-3"><Btn th={theme} sz="sm" onClick={()=>{refreshSharedSync().catch(()=>{});}} disabled={manualSyncing}>{manualSyncing?"Retrying…":"Retry sync"}</Btn><span className="text-xs">Endpoint: {workerApiUrl("/api/health")}</span></div>
-      </div>
-    </div>}
     {showLanding&&<>
       <div className="absolute top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4">
         <span className="font-bold text-white text-2xl drop-shadow">✈ {siteCfg.siteName}</span>

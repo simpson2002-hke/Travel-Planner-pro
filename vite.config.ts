@@ -5,7 +5,6 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 
 const DEFAULT_PORT = Number(process.env.PORT || 4173);
 const githubRepository = process.env.GITHUB_REPOSITORY?.split("/").pop();
-// GitHub Pages publishes this project below /Travel-Planner-pro/, not at the origin root.
 const githubPagesBase = process.env.GITHUB_PAGES === "true" ? `/${githubRepository || "Travel-Planner-pro"}/` : "/";
 
 // https://vite.dev/config/
